@@ -74,6 +74,9 @@ BSTEventResult QuestService::OnEvent(const TESQuestStartStopEvent* apEvent, cons
     {
         if (IsNonSyncableQuest(pQuest))
             return BSTEventResult::kOk;
+
+        if(!m_world.Get().GetPartyService().IsLeader() && pQuest->IsStopped() && !pQuest->IsCompleted())
+            return BSTEventResult::kOk;
      
         if (pQuest->type == TESQuest::Type::None || pQuest->type == TESQuest::Type::Miscellaneous)
         {
