@@ -36,6 +36,7 @@
 #include <Events/SubtitleEvent.h>
 #include <Events/MoveActorEvent.h>
 #include <Events/PartyJoinedEvent.h>
+#include <Events/PartyLeftEvent.h>
 
 #include <Structs/ActionEvent.h>
 #include <Messages/AssignCharacterRequest.h>
@@ -46,6 +47,8 @@
 #include <Messages/RequestFactionsChanges.h>
 #include <Messages/NotifyFactionsChanges.h>
 #include <Messages/NotifyRemoveCharacter.h>
+#include <Messages/NotifyPlayerLeft.h>
+#include <Messages/NotifyPartyInfo.h>
 #include <Messages/RequestOwnershipTransfer.h>
 #include <Messages/NotifyOwnershipTransfer.h>
 #include <Messages/RequestOwnershipClaim.h>
@@ -108,6 +111,9 @@ CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher,
     m_actorTeleportConnection = m_dispatcher.sink<NotifyActorTeleport>().connect<&CharacterService::OnNotifyActorTeleport>(this);
 
     m_partyJoinedConnection = aDispatcher.sink<PartyJoinedEvent>().connect<&CharacterService::OnPartyJoinedEvent>(this);
+    m_partyLeftConnection = aDispatcher.sink<PartyLeftEvent>().connect<&CharacterService::OnPartyLeftEvent>(this);
+    m_playerLeftConnection = aDispatcher.sink<NotifyPlayerLeft>().connect<&CharacterService::OnPlayerLeft>(this);
+    m_partyInfoConnection = aDispatcher.sink<NotifyPartyInfo>().connect<&CharacterService::OnPartyInfo>(this);
 }
 
 void CharacterService::DeleteRemoteEntityComponents(entt::entity aEntity) const noexcept
@@ -777,9 +783,13 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
 
             m_world.remove<LocalAnimationComponent, LocalComponent>(cEntity);
             if (m_world.all_of<RemoteComponent>(cEntity))
-                m_world.get<RemoteComponent>(cEntity).OwnershipEpoch = acMessage.OwnershipEpoch;
+            {
+                auto& remoteComponent = m_world.get<RemoteComponent>(cEntity);
+                remoteComponent.OwnershipEpoch = acMessage.OwnershipEpoch;
+                remoteComponent.OwnerPlayerId = acMessage.OwnerPlayerId;
+            }
             else if (cachedRefId != 0)
-                m_world.emplace<RemoteComponent>(cEntity, acMessage.ServerId, cachedRefId, acMessage.OwnershipEpoch);
+                m_world.emplace<RemoteComponent>(cEntity, acMessage.ServerId, cachedRefId, acMessage.OwnershipEpoch, acMessage.OwnerPlayerId);
 
             spdlog::warn("Declined ownership of actor {:X} at epoch {} because the actor is not ready", acMessage.ServerId, acMessage.OwnershipEpoch);
             DeclineOwnership(acMessage.ServerId, acMessage.OwnershipEpoch);
@@ -814,7 +824,7 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
 
     if (pFormIdComponent)
     {
-        m_world.emplace_or_replace<RemoteComponent>(cEntity, acMessage.ServerId, pFormIdComponent->Id, acMessage.OwnershipEpoch);
+        m_world.emplace_or_replace<RemoteComponent>(cEntity, acMessage.ServerId, pFormIdComponent->Id, acMessage.OwnershipEpoch, acMessage.OwnerPlayerId);
 
         if (!m_world.all_of<InterpolationComponent>(cEntity))
             InterpolationSystem::Setup(m_world, cEntity);
@@ -824,6 +834,7 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
     else if (auto* pRemoteComponent = m_world.try_get<RemoteComponent>(cEntity))
     {
         pRemoteComponent->OwnershipEpoch = acMessage.OwnershipEpoch;
+        pRemoteComponent->OwnerPlayerId = acMessage.OwnerPlayerId;
     }
 
     ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, acMessage.CurrentActorData, pActor && pActor->GetNiNode(), false);
@@ -1171,17 +1182,106 @@ void CharacterService::OnNotifyActorTeleport(const NotifyActorTeleport& acMessag
     spdlog::info("Successfully teleported actor, form id: {:X}, world space: {:X}, cell: {:X}, position: ({}, {}, {})", pActor->formID, acMessage.WorldSpaceId.BaseId, acMessage.CellId.BaseId, acMessage.Position.x, acMessage.Position.y, acMessage.Position.z);
 }
 
+
+bool CharacterService::IsPartyMemberPlayerId(const uint32_t aPlayerId) const noexcept
+{
+    const auto& members = m_world.GetPartyService().GetPartyMembers();
+    return std::find(members.begin(), members.end(), aPlayerId) != members.end();
+}
+
+bool CharacterService::AllRemotePlayersArePartyMembers() const noexcept
+{
+    const auto& partyService = m_world.GetPartyService();
+    if (!partyService.IsInParty())
+        return false;
+
+    const uint32_t localPlayerId = m_transport.GetLocalPlayerId();
+    auto view = m_world.view<PlayerComponent>();
+    for (auto entity : view)
+    {
+        const uint32_t playerId = view.get<PlayerComponent>(entity).Id;
+        if (playerId == localPlayerId)
+            continue;
+        if (!IsPartyMemberPlayerId(playerId))
+            return false;
+    }
+
+    return true;
+}
+
+void CharacterService::ClearRemoteOwnerPlayerId(const uint32_t aOwnerPlayerId) noexcept
+{
+    if (aOwnerPlayerId == 0)
+        return;
+
+    auto view = m_world.view<RemoteComponent>();
+    for (auto entity : view)
+    {
+        auto& remote = view.get<RemoteComponent>(entity);
+        if (remote.OwnerPlayerId == aOwnerPlayerId)
+            remote.OwnerPlayerId = 0;
+    }
+}
+
+void CharacterService::ClearAllRemoteOwnerPlayerIds() noexcept
+{
+    auto view = m_world.view<RemoteComponent>();
+    for (auto entity : view)
+        view.get<RemoteComponent>(entity).OwnerPlayerId = 0;
+}
+
+void CharacterService::InvalidateRemoteOwnersNotInParty(const Vector<uint32_t>& acPartyPlayerIds) noexcept
+{
+    auto view = m_world.view<RemoteComponent>();
+    for (auto entity : view)
+    {
+        auto& remote = view.get<RemoteComponent>(entity);
+        if (remote.OwnerPlayerId == 0)
+            continue;
+        if (std::find(acPartyPlayerIds.begin(), acPartyPlayerIds.end(), remote.OwnerPlayerId) == acPartyPlayerIds.end())
+            remote.OwnerPlayerId = 0;
+    }
+}
+
+void CharacterService::ReclaimRemoteActorsAsLeader() const noexcept
+{
+    auto view = m_world.view<FormIdComponent>(entt::exclude<ObjectComponent>);
+    Vector<entt::entity> entities(view.begin(), view.end());
+    for (auto entity : entities)
+        ProcessNewEntity(entity);
+}
+
+void CharacterService::OnPartyLeftEvent(const PartyLeftEvent&) noexcept
+{
+    // Drop stale party-owner hints so a later party join can use the single-party heuristic again.
+    ClearAllRemoteOwnerPlayerIds();
+}
+
+void CharacterService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
+{
+    // Owner disconnected: forget their id until a fresh NotifyOwnershipTransfer arrives.
+    // Server already reassigns via OwnershipTransferEvent -> TransferToNextOwner.
+    ClearRemoteOwnerPlayerId(acMessage.PlayerId);
+}
+
+void CharacterService::OnPartyInfo(const NotifyPartyInfo& acPartyInfo) noexcept
+{
+    if (!m_world.GetPartyService().IsInParty())
+        return;
+
+    // Use the message's member list (not PartyService state) so sink order does not matter.
+    InvalidateRemoteOwnersNotInParty(acPartyInfo.PlayerIds);
+
+    // Leader change / party roster update: new leader re-evaluates claims; non-leaders no longer claim.
+    if (acPartyInfo.IsLeader)
+        ReclaimRemoteActorsAsLeader();
+}
+
 void CharacterService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept
 {
     // Takes ownership of all actors
     if (acEvent.IsLeader)
-    {
-        auto view = m_world.view<FormIdComponent>(entt::exclude<ObjectComponent>);
-        Vector<entt::entity> entities(view.begin(), view.end());
-
-        for (auto entity : entities)
-            ProcessNewEntity(entity);
-    }
+        ReclaimRemoteActorsAsLeader();
 }
 
 void CharacterService::MoveActor(const Actor* apActor, const GameId& acWorldSpaceId, const GameId& acCellId, const Vector3_NetQuantize& acPosition) const noexcept
@@ -1229,13 +1329,25 @@ void CharacterService::ProcessNewEntity(entt::entity aEntity) const noexcept
 
     if (auto* pRemoteComponent = m_world.try_get<RemoteComponent>(aEntity); pRemoteComponent)
     {
-        // TODO(cosideci): don't just take all actors (i.e. from other parties),
-        // maybe check it server side, add a variable to the request.
+        // Leaders host party actors, but must not speculative-claim NPCs owned by other parties
+        // on a shared multi-party server. Server CanClaimOwnership enforces the same rule.
         if (m_world.GetPartyService().IsLeader() && !pActor->IsTemporary() && !pActor->IsMount())
         {
-            spdlog::info("Sending ownership claim for actor {:X} with server id {:X}", pActor->formID, pRemoteComponent->Id);
+            const uint32_t ownerPlayerId = pRemoteComponent->OwnerPlayerId;
+            const bool knownPartyOwner = ownerPlayerId != 0 && IsPartyMemberPlayerId(ownerPlayerId);
+            const bool unknownOwnerSafeToProbe = ownerPlayerId == 0 && AllRemotePlayersArePartyMembers();
 
-            RequestOwnership(pActor->formID, pRemoteComponent->Id, aEntity);
+            if (knownPartyOwner || unknownOwnerSafeToProbe)
+            {
+                spdlog::info("Sending ownership claim for actor {:X} with server id {:X} (owner player {:X})", pActor->formID, pRemoteComponent->Id, ownerPlayerId);
+                RequestOwnership(pActor->formID, pRemoteComponent->Id, aEntity);
+            }
+            else
+            {
+                spdlog::debug(
+                    "Skipping ownership claim for actor {:X} server id {:X}: owner player {:X} is outside this party (or multi-party peers are present)",
+                    pActor->formID, pRemoteComponent->Id, ownerPlayerId);
+            }
         }
         else
             spdlog::info("New entity remotely managed, form id: {:X}, server id: {:X}", pActor->formID, pRemoteComponent->Id);

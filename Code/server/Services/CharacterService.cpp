@@ -781,9 +781,19 @@ bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aE
     if (!partyService.IsPlayerInParty(apPlayer) || !partyService.IsPlayerLeader(apPlayer))
         return reject("the player is not the party leader");
 
+    // Explicit cross-party guard (defensive; Members check below should also fail).
+    const auto& claimerPartyId = apPlayer->GetParty().JoinedPartyId;
+    const auto& ownerPartyId = pCurrentOwner->GetParty().JoinedPartyId;
+    if (claimerPartyId.has_value() && ownerPartyId.has_value() && *claimerPartyId != *ownerPartyId)
+        return reject("the current owner belongs to another party");
+
     PartyService::Party* const pParty = partyService.GetPlayerParty(apPlayer);
     if (!pParty || std::find(pParty->Members.begin(), pParty->Members.end(), pCurrentOwner) == pParty->Members.end())
+    {
+        if (!pCurrentOwner->GetParty().JoinedPartyId.has_value())
+            return reject("the current owner is not in a party");
         return reject("the current owner is not in the party");
+    }
 
     return true;
 }
