@@ -82,10 +82,11 @@ void PartyService::OnUpdate(const UpdateEvent& acEvent) noexcept
     // Only expire once every 10 seconds
     m_nextInvitationExpire = cCurrentTick + 10000;
 
-    auto view = m_world.view<PartyComponent>();
-    for (auto entity : view)
+    // PartyComponent lives on Player (Player::GetParty()), not in the registry, so an entt view
+    // over it is empty and invitations never expired. Iterate the players instead.
+    for (Player* pPlayer : m_world.GetPlayerManager())
     {
-        auto& partyComponent = view.get<PartyComponent>(entity);
+        auto& partyComponent = pPlayer->GetParty();
         auto itor = std::begin(partyComponent.Invitations);
         while (itor != std::end(partyComponent.Invitations))
         {
@@ -354,6 +355,12 @@ void PartyService::OnPartyLeave(const PacketEvent<PartyLeaveRequest>& acPacket) 
 void PartyService::OnPlayerLeave(const PlayerLeaveEvent& acEvent) noexcept
 {
     RemovePlayerFromParty(acEvent.pPlayer);
+
+    // Invitations are keyed by inviter Player*, which is freed after this event; drop them so a
+    // later Player allocated at the same address cannot inherit a pending invite.
+    for (Player* pPlayer : m_world.GetPlayerManager())
+        pPlayer->GetParty().Invitations.erase(acEvent.pPlayer);
+
     BroadcastPlayerList(acEvent.pPlayer);
 }
 
