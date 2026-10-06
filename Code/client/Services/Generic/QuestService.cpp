@@ -198,10 +198,15 @@ size_t QuestService::ReapplyCachedPartyQuestUpdates() noexcept
     size_t applied = 0;
     // Copy so ApplyQuestUpdate cannot invalidate the cache mid-loop.
     const Vector<NotifyQuestUpdate> snapshot = m_partyQuestUpdateCache;
-    for (const auto& update : snapshot)
     {
-        ApplyQuestUpdate(update);
-        ++applied;
+        // Suppress local quest-event hooks during replay so ScriptSetStage/SetActive echoes
+        // are not re-sent as RequestQuestUpdate (same guard TESQuest uses for remote applies).
+        ScopedQuestOverride _;
+        for (const auto& update : snapshot)
+        {
+            ApplyQuestUpdate(update);
+            ++applied;
+        }
     }
 
     spdlog::info("Reapplied {} cached party quest update(s) for guest desync recovery", applied);
