@@ -340,6 +340,8 @@ void PartyService::OnPartyAcceptInvite(const PacketEvent<PartyAcceptInviteReques
         Party& party = *pParty;
         party.Members.push_back(pSelf);
         selfPartyComponent.JoinedPartyId = partyId;
+        // Consume the invite; otherwise it could be re-accepted after leaving until it expires.
+        selfPartyComponent.Invitations.erase(pInviter);
 
         spdlog::debug("[PartyService]: Added invitee to party, sending events");
         SendPartyJoinedEvent(party, pSelf);
