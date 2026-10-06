@@ -88,7 +88,7 @@ struct PartyService
 {
     struct Party
     {
-        uint32_t LeaderPlayerId;
+        uint32_t LeaderPlayerId{0}; // PlayerIDs start at 1, so zero is "no leader."
         Vector<Player*> Members;
         GameId CachedWeather{};
         QuestStageDedupHistory m_questStageDedupHistory;
@@ -116,6 +116,7 @@ protected:
     void OnPartyChangeLeader(const PacketEvent<PartyChangeLeaderRequest>& acPacket) noexcept;
     void OnPartyKick(const PacketEvent<PartyKickRequest>& acPacket) noexcept;
     void RemovePlayerFromParty(Player* apPlayer) noexcept;
+    void RemoveMemberFromParty(Party& aParty, uint32_t aPartyId, Player* apPlayer) noexcept;
 
     void BroadcastPlayerList(Player* apPlayer = nullptr) const noexcept;
     void BroadcastPartyInfo(uint32_t aPartyId) const noexcept;
