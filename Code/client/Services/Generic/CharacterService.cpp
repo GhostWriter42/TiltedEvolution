@@ -1187,8 +1187,19 @@ void CharacterService::OnNotifyDialogue(const NotifyDialogue& acMessage) noexcep
     // A member can initiate dialogue with an NPC owned by this client.
     Actor* pActor = Utils::GetByServerId<Actor>(acMessage.ServerId);
 
-    if (!pActor)
+    if (!pActor || pActor->IsDeleted())
         return;
+
+    // Nothing to play: don't cut off whatever the actor is currently saying.
+    if (acMessage.SoundFilename.empty())
+        return;
+
+    // Peers never legitimately voice our own player; a stray message would cut our dialogue.
+    if (pActor->formID == 0x14)
+    {
+        spdlog::warn(__FUNCTION__ ": ignoring dialogue for the local player, serverId {:X}", acMessage.ServerId);
+        return;
+    }
 
     spdlog::debug(
         __FUNCTION__ ": playing dialogue Actor {:X}, serverId {:X}, isLeader {}, name {}, soundFile {}", pActor->formID, acMessage.ServerId, isLeader, pActor->baseForm->GetName(),
@@ -1259,7 +1270,7 @@ void CharacterService::OnNotifySubtitle(const NotifySubtitle& acMessage) noexcep
     const bool isLeader = World::Get().GetPartyService().IsLeader();
     Actor* pActor = Utils::GetByServerId<Actor>(acMessage.ServerId);
 
-    if (!pActor)
+    if (!pActor || pActor->IsDeleted())
         return;
 
     SubtitleManager* pSubtitleManager = SubtitleManager::Get();
