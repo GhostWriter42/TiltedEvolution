@@ -1291,6 +1291,15 @@ void CharacterService::OnNotifySubtitle(const NotifySubtitle& acMessage) noexcep
 
 void CharacterService::RunSubtitleTimeouts() noexcept
 {
+    // OnDisconnected is const, so per-connection dialogue/subtitle state is dropped here:
+    // once offline, forget the dedupe key and hide every synced subtitle right away.
+    const bool isConnected = m_transport.IsConnected();
+    if (!isConnected && !m_lastDialogueFile.empty())
+    {
+        m_lastDialogueServerId = 0;
+        m_lastDialogueFile.clear();
+    }
+
     if (m_syncedSubtitleDeadlines.empty())
         return;
 
@@ -1299,7 +1308,7 @@ void CharacterService::RunSubtitleTimeouts() noexcept
 
     for (auto it = m_syncedSubtitleDeadlines.begin(); it != m_syncedSubtitleDeadlines.end();)
     {
-        if (now < it->second)
+        if (isConnected && now < it->second)
         {
             ++it;
             continue;
