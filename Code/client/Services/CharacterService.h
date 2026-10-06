@@ -127,6 +127,12 @@ private:
 
     float m_cachedExperience = 0.f;
 
+    // Last DialogueRequest sent, used to drop the duplicate DialogueEvent produced when
+    // SpeakSoundFunction is queued and then reinvoked for the same line (main thread only).
+    uint32_t m_lastDialogueServerId = 0;
+    String m_lastDialogueFile{};
+    std::chrono::steady_clock::time_point m_lastDialogueTime{};
+
     // TODO: revamp this, read the local anim var like vampire lord?
     struct WeaponDrawData
     {

@@ -1139,6 +1139,21 @@ void CharacterService::OnDialogueEvent(const DialogueEvent& acEvent) noexcept
 
     if (willSync)
     {
+        // Most lines hit SpeakSoundFunction twice (queue, then reinvocation), which would make
+        // remotes StopCurrentDialogue + restart the same line. Drop the echo; no real voiced line
+        // replays on the same actor this fast.
+        constexpr auto cDialogueDedupeWindow = 250ms;
+        const auto now = std::chrono::steady_clock::now();
+        if (serverIdRes.value() == m_lastDialogueServerId && acEvent.VoiceFile == m_lastDialogueFile && now - m_lastDialogueTime < cDialogueDedupeWindow)
+        {
+            spdlog::debug(__FUNCTION__ ": dropping duplicate dialogue, serverId {:X}, soundFile {}", serverIdRes.value(), acEvent.VoiceFile);
+            return;
+        }
+
+        m_lastDialogueServerId = serverIdRes.value();
+        m_lastDialogueFile = acEvent.VoiceFile;
+        m_lastDialogueTime = now;
+
         DialogueRequest request{};
         request.ServerId = serverIdRes.value();
         request.SoundFilename = acEvent.VoiceFile;
