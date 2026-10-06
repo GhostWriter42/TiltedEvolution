@@ -188,6 +188,12 @@ void QuestService::OnPartyLeft(const PartyLeftEvent&) noexcept
 
 void QuestService::RememberPartyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
 {
+    // Collapse by GameId: latest Notify for a quest wins (cleaner guest reapply).
+    auto it = std::find_if(m_partyQuestUpdateCache.begin(), m_partyQuestUpdateCache.end(),
+                           [&aUpdate](const NotifyQuestUpdate& e) { return e.Id == aUpdate.Id; });
+    if (it != m_partyQuestUpdateCache.end())
+        m_partyQuestUpdateCache.erase(it);
+
     m_partyQuestUpdateCache.push_back(aUpdate);
     if (m_partyQuestUpdateCache.size() > kMaxCachedPartyQuestUpdates)
         m_partyQuestUpdateCache.erase(m_partyQuestUpdateCache.begin());
@@ -202,16 +208,12 @@ size_t QuestService::ReapplyCachedPartyQuestUpdates() noexcept
 
     size_t applied = 0;
     // Copy so ApplyQuestUpdate cannot invalidate the cache mid-loop.
+    // ApplyQuestUpdate holds ScopedQuestOverride (echo harden) for each entry.
     const Vector<NotifyQuestUpdate> snapshot = m_partyQuestUpdateCache;
+    for (const auto& update : snapshot)
     {
-        // Suppress local quest-event hooks during replay so ScriptSetStage/SetActive echoes
-        // are not re-sent as RequestQuestUpdate (same guard TESQuest uses for remote applies).
-        ScopedQuestOverride _;
-        for (const auto& update : snapshot)
-        {
-            ApplyQuestUpdate(update);
-            ++applied;
-        }
+        ApplyQuestUpdate(update);
+        ++applied;
     }
 
     spdlog::info("Reapplied {} cached party quest update(s) for guest desync recovery", applied);
@@ -226,6 +228,10 @@ void QuestService::OnQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
 
 void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
 {
+    // Echo harden: remote apply + guest reapply must not reflect as RequestQuestUpdate.
+    // (ScriptSetStage/StopQuest do not always hold ScopedQuestOverride themselves.)
+    ScopedQuestOverride _;
+
     ModSystem& modSystem = World::Get().GetModSystem();
     uint32_t formId = modSystem.GetGameId(aUpdate.Id);
     TESQuest* pQuest = Cast<TESQuest>(TESForm::GetById(formId));
