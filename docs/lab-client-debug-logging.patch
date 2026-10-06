@@ -1,0 +1,16 @@
+diff --git a/Code/client/TiltedOnlineApp.cpp b/Code/client/TiltedOnlineApp.cpp
+index 98b6c65b..2ad7581e 100644
+--- a/Code/client/TiltedOnlineApp.cpp
++++ b/Code/client/TiltedOnlineApp.cpp
+@@ -68,9 +68,10 @@ TiltedOnlineApp::TiltedOnlineApp()
+     create_directory(logPath, ec);
+ 
+     auto rotatingLogger = CreateClientLogSink(logPath);
+-    // rotatingLogger->set_level(spdlog::level::debug);
++    rotatingLogger->set_level(spdlog::level::debug);
+     auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+     auto logger = std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{console, rotatingLogger});
++    logger->set_level(spdlog::level::debug); // lab-only: spdlog loggers default to info
+     logger->set_pattern("%^[%Y-%m-%d %H:%M:%S.%e] [%l] [tid %t] %$ %v");
+     spdlog::flush_every(std::chrono::seconds(1));
+     set_default_logger(logger);
