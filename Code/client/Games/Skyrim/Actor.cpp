@@ -1275,7 +1275,6 @@ float Actor::GetVoiceRecoveryTime() noexcept
 
 bool Actor::IsSpeakingInScene() 
 {
-    auto pScene = GetCurrentScene();
     bool isSpeakingInScene = IsInScene(); 
     isSpeakingInScene = isSpeakingInScene && GetVoiceRecoveryTime() > 0.0f;
     const bool isTalking = IsTalking(); 
