@@ -124,7 +124,10 @@ void PartyService::OnPartyInfo(const NotifyPartyInfo& acPartyInfo) noexcept
         if (m_isLeader)
         {
             TESGlobal* pWorldEncountersEnabled = Cast<TESGlobal>(TESForm::GetById(0xB8EC1));
-            pWorldEncountersEnabled->f = 1.f;
+            if (pWorldEncountersEnabled)
+                pWorldEncountersEnabled->f = 1.f;
+            else
+                spdlog::warn("[PartyService]: WorldEncountersEnabled global (0xB8EC1) not found");
         }
 
         auto pArguments = CefListValue::Create();
