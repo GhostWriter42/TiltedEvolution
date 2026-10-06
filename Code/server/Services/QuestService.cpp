@@ -106,10 +106,11 @@ void QuestService::OnQuestChanges(const PacketEvent<RequestQuestUpdate>& acMessa
         break;
 
     default:
+        // notify.Status is still value-initialized (StageUpdate) here; don't fan out a bogus stage update.
         spdlog::error(
-            "{}: unknown quest status {} quest: {:X}, stage: {}, status {}, by {} {:X}", __FUNCTION__, notify.Status, message.Id.LogFormat(), notify.Stage, notify.Status,
+            "{}: unknown quest status {}, dropping quest: {:X}, stage: {}, by {} {:X}", __FUNCTION__, message.Status, message.Id.LogFormat(), notify.Stage,
             playerTypeString, pPlayer->GetId());
-        break;
+        return;
     }
 
     // All side effects have been generated. Now just logging and a forwarding decision left.
