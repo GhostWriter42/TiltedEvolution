@@ -166,13 +166,19 @@ void DebugService::DrawPartyView()
         const auto& cache = questService.GetCachedPartyQuestUpdates();
         ImGui::Text("Cached party quest updates: %zu", cache.size());
 
-        if (ImGui::Button("Re-apply cached party quest updates"))
+        if (cache.empty())
+        {
+            ImGui::TextDisabled("Re-apply unavailable (cache empty).");
+        }
+        else if (ImGui::Button("Re-apply cached party quest updates"))
         {
             const size_t applied = questService.ReapplyCachedPartyQuestUpdates();
             spdlog::info("Guest recovery: reapplied {} cached quest update(s)", applied);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Clear quest update cache"))
+        if (cache.empty())
+            ImGui::TextDisabled("Clear unavailable.");
+        else if (ImGui::Button("Clear quest update cache"))
             questService.ClearCachedPartyQuestUpdates();
 
         if (!partyService.IsLeader())
@@ -183,8 +189,9 @@ void DebugService::DrawPartyView()
                 m_transport.Send(request);
             }
 
-            auto leaderEntry = players.find(partyService.GetLeaderPlayerId());
-            if (leaderEntry != players.end())
+            const uint32_t leaderId = partyService.GetLeaderPlayerId();
+            auto leaderEntry = players.find(leaderId);
+            if (leaderId != 0 && leaderId != static_cast<uint32_t>(-1) && leaderEntry != players.end())
             {
                 ImGui::SameLine();
                 if (ImGui::Button("Teleport to leader"))
@@ -196,12 +203,12 @@ void DebugService::DrawPartyView()
             }
             else
             {
-                ImGui::TextDisabled("Leader name unavailable for teleport.");
+                ImGui::TextDisabled("Teleport unavailable (no leader / name unknown).");
             }
         }
         else
         {
-            ImGui::TextDisabled("Leader: use the Quests debugger for force-setStage; members use this panel.");
+            ImGui::TextDisabled("Leader: teleport-to-self disabled; use Quests debugger for force-setStage.");
         }
 
         if (ImGui::CollapsingHeader("Local syncable quest stages (read-only)"))
