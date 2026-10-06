@@ -37,9 +37,13 @@ void QuestService::OnQuestChanges(const PacketEvent<RequestQuestUpdate>& acMessa
     bool isLeader = partyService.IsPlayerLeader(pPlayer);
     auto playerTypeString = isLeader ? "leader" : "player";
     auto partyId = pPlayer->GetParty().JoinedPartyId;
-    PartyService::Party* pParty = partyService.GetPlayerParty(pPlayer);
-    Player* pLeader = isLeader ? pPlayer : m_world.GetPlayerManager().GetById(pParty->LeaderPlayerId);
-    auto& dedupHistory = pParty->GetQuestStageDedupHistory();
+    // GetPlayerParty() is null when the sender has no party (a queued request can arrive after it left)
+    // or a stale JoinedPartyId (lookup uses find()). Still record the quest log entry below, but skip
+    // party dedup/fan-out.
+    PartyService::Party* pParty = inParty ? partyService.GetPlayerParty(pPlayer) : nullptr;
+    if (!pParty)
+        inParty = false;
+    Player* pLeader = !pParty ? nullptr : (isLeader ? pPlayer : m_world.GetPlayerManager().GetById(pParty->LeaderPlayerId));
 
     // Find the corresponding quest log entry
     auto& questComponent = pPlayer->GetQuestLogComponent();
@@ -50,7 +54,7 @@ void QuestService::OnQuestChanges(const PacketEvent<RequestQuestUpdate>& acMessa
     notify.Id = message.Id;
     notify.Stage = message.Stage;
     // notify.Status = message.Status;  // Now set correctly in switch
-    notify.SceneMaster = dedupHistory.GetSceneMaster();
+    notify.SceneMaster = pParty ? pParty->GetQuestStageDedupHistory().GetSceneMaster() : 0;
     notify.ClientQuestType = message.ClientQuestType;
 
     // Update QuestComponent. In order to prevent bugs when
@@ -111,6 +115,8 @@ void QuestService::OnQuestChanges(const PacketEvent<RequestQuestUpdate>& acMessa
     // All side effects have been generated. Now just logging and a forwarding decision left.
     if (inParty)
     {
+        auto& dedupHistory = pParty->GetQuestStageDedupHistory();
+
         if (notify.ClientQuestType == 0 ||
             notify.ClientQuestType == 6) // Types None or Miscellaneous. Hard-coded to avoid including client header file.
         {
@@ -185,6 +191,10 @@ void QuestService::OnQuestChanges(const PacketEvent<RequestQuestUpdate>& acMessa
                 spdlog::debug(
                     "{}: SendToLeader dropping duplicate quest: {:X}, stage: {}, status: {}, by {} {:X}", __FUNCTION__, notify.Id.LogFormat(), notify.Stage, notify.Status,
                     playerTypeString, pPlayer->GetId());
+            else if (!pLeader)
+                spdlog::warn(
+                    "{}: SendToLeader no leader {} found for party, dropping quest: {:X}, stage: {}, status: {}, by {} {:X}", __FUNCTION__, pParty->LeaderPlayerId,
+                    notify.Id.LogFormat(), notify.Stage, notify.Status, playerTypeString, pPlayer->GetId());
             else
             {
                 spdlog::debug(
@@ -212,7 +222,11 @@ void QuestService::OnQuestSceneChanges(const PacketEvent<RequestQuestSceneUpdate
         return;
 
     PartyService::Party* pParty = partyService.GetPlayerParty(pPlayer);
-    Player* pLeader = isLeader ? pPlayer : m_world.GetPlayerManager().GetById(pParty->LeaderPlayerId);
+    if (!pParty)
+    {
+        spdlog::warn("{}: no party for {} {:X}, dropping scene {} update", __FUNCTION__, playerTypeString, pPlayer->GetId(), sceneTypeString);
+        return;
+    }
     auto& dedupHistory = pParty->GetQuestStageDedupHistory();
 
     // Make sure party knows scene state.
