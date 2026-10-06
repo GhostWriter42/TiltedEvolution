@@ -20,7 +20,7 @@ this branch, and each one is listed with its short SHA on `experimental`.
 - [#848](https://github.com/tiltedphoques/TiltedEvolution/pull/848) quest rework (rfortier): server
   per-party `QuestStageDedupHistory` (30 s TTL), member → leader → party fan-out, SceneMaster and the
   SceneEnd forced-stage poke, new QuestScene messages. Rebased onto #854 and merged in `cc16d07d`.
-- [#846](https://github.com/tiltedphoques/TiltedEvolution/pull/846) (liangchen): members don't sync
+- [#846](https://github.com/tiltedphoques/TiltedEvolution/pull/846) (otsffs): members don't sync
   Stopped for incomplete quests. Adds our fix `2d059c08`: `TESQuest::IsCompleted()` restores the
   completed-stop check, so turn-ins still sync. Merge `a677ff94`.
 - [#915](https://github.com/tiltedphoques/TiltedEvolution/pull/915) quest-item pickup sync (draft):
