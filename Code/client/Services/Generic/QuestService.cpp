@@ -74,6 +74,11 @@ BSTEventResult QuestService::OnEvent(const TESQuestStartStopEvent* apEvent, cons
     {
         if (IsNonSyncableQuest(pQuest))
             return BSTEventResult::kOk;
+
+        // Members don't sync incomplete stops (e.g. radiant false-fails), but completed
+        // stops (turn-ins) still sync so member progression works.
+        if(!m_world.Get().GetPartyService().IsLeader() && pQuest->IsStopped() && !pQuest->IsCompleted())
+            return BSTEventResult::kOk;
      
         if (pQuest->type == TESQuest::Type::None || pQuest->type == TESQuest::Type::Miscellaneous)
         {
