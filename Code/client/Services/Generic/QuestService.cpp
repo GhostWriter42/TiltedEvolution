@@ -459,7 +459,9 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
                 miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type), pQuest->IsStopped(),
                 pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
 
-            if (m_isResyncing)
+            // Only expect echoes if ScriptSetStage will reach Papyrus; when its filter rejects the stage
+            // nothing fires and the records would swallow a genuine restart for kResyncEchoWindow.
+            if (m_isResyncing && pQuest->PassesScriptSetStageFilter(aUpdate.Stage))
                 ExpectResyncEcho(formId, aUpdate.Stage, true, kEchoStarted);
             pQuest->ScriptSetStage(aUpdate.Stage);
             pQuest->SetActive(true);

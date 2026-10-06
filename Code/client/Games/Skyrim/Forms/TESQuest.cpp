@@ -102,11 +102,17 @@ bool TESQuest::SetStage(uint16_t stageIndex)
     return bSuccess;
 }
 
-bool TESQuest::ScriptSetStage(uint16_t stageIndex, bool bForce)
+bool TESQuest::PassesScriptSetStageFilter(uint16_t stageIndex)
 {
     // Since SetStage() rules are not well-known and hooks may be confused, filter rewind
-    // according to TESQuest::SetStage rules.
-    bool bSuccess = stageIndex > currentStage || stageIndex != currentStage && !IsStageDone(stageIndex) || bForce;
+    // according to TESQuest::SetStage rules. When this is false (and !bForce), ScriptSetStage
+    // returns without calling Papyrus, so no quest events fire.
+    return stageIndex > currentStage || stageIndex != currentStage && !IsStageDone(stageIndex);
+}
+
+bool TESQuest::ScriptSetStage(uint16_t stageIndex, bool bForce)
+{
+    bool bSuccess = PassesScriptSetStageFilter(stageIndex) || bForce;
 
     if (bSuccess)
     {

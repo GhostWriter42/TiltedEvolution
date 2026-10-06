@@ -160,6 +160,7 @@ struct TESQuest : BGSStoryManagerTreeForm
 
     bool SetStage(uint16_t stageIndex);
     bool ScriptSetStage(uint16_t stage, bool bForce = false);
+    bool PassesScriptSetStageFilter(uint16_t stageIndex); // ScriptSetStage's pre-Papyrus filter (bForce aside)
     void ScriptReset();
     void ScriptResetAndUpdate();
     void SetStopped();
