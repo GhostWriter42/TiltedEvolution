@@ -505,8 +505,8 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
                          "isStopped: {}, flags: {:X}, {} {}, name: {}",
             miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type), pQuest->IsStopped(),
             pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
-        if (m_isResyncing && pQuest->getState() != TESQuest::State::Stopped)
-            ExpectResyncEcho(formId, 0, false, kEchoStopped);
+        // No resync echo record here: StopQuest() only writes flags (SetActive/SetStopped), so no
+        // TESQuestStartStopEvent fires and a record would just swallow the next genuine stop.
         wasUpdated = StopQuest(formId);
         break;
 
