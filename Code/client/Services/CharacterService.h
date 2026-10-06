@@ -95,6 +95,9 @@ private:
     void DeleteRemoteEntityComponents(entt::entity aEntity) const noexcept;
     void DeclineOwnership(uint32_t aServerId, uint32_t aOwnershipEpoch) const noexcept;
     void ReconcileActorData(entt::entity aEntity, Actor* apActor, uint32_t aOwnershipEpoch, const ActorData& acActorData, bool aApplyInventory, bool aIsLocalOwner) noexcept;
+    [[nodiscard]] bool IsPartyMemberPlayerId(uint32_t aPlayerId) const noexcept;
+    // True when every known remote PlayerComponent belongs to our party (safe for speculative leader claims).
+    [[nodiscard]] bool AllRemotePlayersArePartyMembers() const noexcept;
 
     Actor* CreateCharacterForEntity(entt::entity aEntity) const noexcept;
     ActorData BuildActorData(Actor* apActor) const noexcept;
