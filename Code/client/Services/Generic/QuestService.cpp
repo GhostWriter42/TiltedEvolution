@@ -282,11 +282,18 @@ void QuestService::OnDisconnected(const DisconnectedEvent&) noexcept
     // #848 Disconnected(): forget our player id (folded into Party #5 handler).
     m_playerId = 0;
     ClearCachedPartyQuestUpdates();
+
+    // Pending resync echo records belong to the old session/party; don't let them swallow new events.
+    std::lock_guard lock(m_resyncEchoMutex);
+    m_resyncEchoes.clear();
 }
 
 void QuestService::OnPartyLeft(const PartyLeftEvent&) noexcept
 {
     ClearCachedPartyQuestUpdates();
+
+    std::lock_guard lock(m_resyncEchoMutex);
+    m_resyncEchoes.clear();
 }
 
 void QuestService::RememberPartyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
