@@ -654,6 +654,11 @@ void GameServer::OnDisconnection(const ConnectionId_t aConnectionId, EDisconnect
 
         m_pWorld->GetDispatcher().update();
 
+        // pPlayer is freed below; drop it from other actors' handoff blacklists so a later
+        // Player allocated at the same address is not wrongly skipped by TransferToNextOwner.
+        for (auto entity : m_pWorld->view<OwnerComponent>())
+            std::erase(m_pWorld->get<OwnerComponent>(entity).InvalidOwners, static_cast<const Player*>(pPlayer));
+
         m_pWorld->GetPlayerManager().Remove(pPlayer);
     }
 
