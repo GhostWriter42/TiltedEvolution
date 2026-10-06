@@ -274,6 +274,15 @@ void CharacterService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept
 
     m_pendingLeveledConforms.erase(acEvent.FormId);
 
+    // A synced subtitle for an actor leaving the loaded area would otherwise linger.
+    if (m_syncedSubtitleDeadlines.erase(acEvent.FormId) > 0)
+    {
+        auto* pActor = Cast<Actor>(TESForm::GetById(acEvent.FormId));
+        auto* pSubtitleManager = SubtitleManager::Get();
+        if (pActor && !pActor->IsDeleted() && pSubtitleManager)
+            pSubtitleManager->HideSubtitle(pActor);
+    }
+
     auto view = m_world.view<FormIdComponent>();
     const auto entityIt = std::find_if(view.begin(), view.end(), [view, formId = acEvent.FormId](auto aEntity) { return view.get<FormIdComponent>(aEntity).Id == formId; });
 
@@ -308,6 +317,7 @@ void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
     RunExperienceUpdates();
     ApplyCachedWeaponDraws(acUpdateEvent);
     ProcessLeveledConforms();
+    RunSubtitleTimeouts();
 }
 
 void CharacterService::OnConnected(const ConnectedEvent& acConnectedEvent) const noexcept
@@ -1181,6 +1191,9 @@ void CharacterService::OnNotifyDialogue(const NotifyDialogue& acMessage) noexcep
 
 void CharacterService::OnSubtitleEvent(const SubtitleEvent& acEvent) noexcept
 {
+    // The game is driving this actor's subtitle locally now; don't force-hide it later.
+    m_syncedSubtitleDeadlines.erase(acEvent.SpeakerID);
+
     if (!m_transport.IsConnected())
         return;
 
@@ -1240,6 +1253,18 @@ void CharacterService::OnNotifySubtitle(const NotifySubtitle& acMessage) noexcep
     if (!pActor)
         return;
 
+    SubtitleManager* pSubtitleManager = SubtitleManager::Get();
+    if (!pSubtitleManager)
+        return;
+
+    if (acMessage.Text.empty())
+    {
+        // Nothing to show; just make sure a previous synced line doesn't linger.
+        pSubtitleManager->HideSubtitle(pActor);
+        m_syncedSubtitleDeadlines.erase(pActor->formID);
+        return;
+    }
+
     // This is only for fallout 4
     TESTopicInfo* pInfo = nullptr;
     pInfo = Cast<TESTopicInfo>(TESForm::GetById(acMessage.TopicFormId));
@@ -1247,8 +1272,39 @@ void CharacterService::OnNotifySubtitle(const NotifySubtitle& acMessage) noexcep
     spdlog::debug(__FUNCTION__ ": showing subtitle Actor {:X}, serverId {:X}, isLeader {}, name {}, message: {}",
                      pActor->formID, acMessage.ServerId, isLeader, pActor->baseForm->GetName(), acMessage.Text);
 
-    SubtitleManager::Get()->HideSubtitle(pActor);   // Subtitle conflicts can hang, this makes it beter at least.
-    SubtitleManager::Get()->ShowSubtitle(pActor, acMessage.Text.c_str(), pInfo);
+    pSubtitleManager->HideSubtitle(pActor);   // Subtitle conflicts can hang, this makes it beter at least.
+    pSubtitleManager->ShowSubtitle(pActor, acMessage.Text.c_str(), pInfo);
+
+    // Longer than any voiced line; a newer subtitle for the actor pushes the deadline out.
+    constexpr auto cSyncedSubtitleTimeout = 30s;
+    m_syncedSubtitleDeadlines[pActor->formID] = std::chrono::steady_clock::now() + cSyncedSubtitleTimeout;
+}
+
+void CharacterService::RunSubtitleTimeouts() noexcept
+{
+    if (m_syncedSubtitleDeadlines.empty())
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    SubtitleManager* pSubtitleManager = SubtitleManager::Get();
+
+    for (auto it = m_syncedSubtitleDeadlines.begin(); it != m_syncedSubtitleDeadlines.end();)
+    {
+        if (now < it->second)
+        {
+            ++it;
+            continue;
+        }
+
+        auto* pActor = Cast<Actor>(TESForm::GetById(it->first));
+        if (pActor && !pActor->IsDeleted() && pSubtitleManager)
+        {
+            spdlog::debug(__FUNCTION__ ": hiding expired synced subtitle, formId {:X}", it->first);
+            pSubtitleManager->HideSubtitle(pActor);
+        }
+
+        it = m_syncedSubtitleDeadlines.erase(it);
+    }
 }
 
 void CharacterService::OnNotifyActorTeleport(const NotifyActorTeleport& acMessage) noexcept

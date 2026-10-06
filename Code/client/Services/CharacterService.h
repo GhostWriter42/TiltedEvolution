@@ -119,6 +119,7 @@ private:
     void RunFactionsUpdates() const noexcept;
     void RunSpawnUpdates() const noexcept;
     void RunExperienceUpdates() noexcept;
+    void RunSubtitleTimeouts() noexcept;
     void ApplyCachedWeaponDraws(const UpdateEvent& acUpdateEvent) noexcept;
 
     World& m_world;
@@ -132,6 +133,10 @@ private:
     uint32_t m_lastDialogueServerId = 0;
     String m_lastDialogueFile{};
     std::chrono::steady_clock::time_point m_lastDialogueTime{};
+
+    // Actor form ID -> time after which a subtitle shown from NotifySubtitle is force-hidden.
+    // Backstop so a synced subtitle can't stay on screen forever (main thread only).
+    Map<uint32_t, std::chrono::steady_clock::time_point> m_syncedSubtitleDeadlines{};
 
     // TODO: revamp this, read the local anim var like vampire lord?
     struct WeaponDrawData
