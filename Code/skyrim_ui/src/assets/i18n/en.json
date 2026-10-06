@@ -52,7 +52,8 @@
         "PARTY_LEADER_TALK": "Only the party leader can talk to quest NPCs to progress quests.",
         "PARTY_LEADER_LOOT_QUESTITEMS": "Only the party leader can loot quest items.",
         "KEEP_PARTY_LEADER": "Stick to one party leader per playthrough.",
-        "ONE_PARTY_PER_SERVER": "Stick to one party per server."
+        "ONE_PARTY_PER_SERVER": "Stick to one party per server.",
+        "DESYNC_RECOVERY": "If you fall behind on quests: open the Party debug panel to re-apply cached party quest updates, refresh weather, or teleport to the leader. This cannot pull stages you never received."
       },
       "NO_PLAYERS_IN_PARTY": "There is nobody in your party yet. Invite them through the player list!",
       "TABLE_HEADERS": {

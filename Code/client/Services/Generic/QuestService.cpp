@@ -1,6 +1,8 @@
 #include <TiltedOnlinePCH.h>
 
 #include <Events/ConnectedEvent.h>
+#include <Events/DisconnectedEvent.h>
+#include <Events/PartyLeftEvent.h>
 
 #include <Services/QuestService.h>
 #include <Services/ImguiService.h>
@@ -31,6 +33,8 @@ QuestService::QuestService(World& aWorld, entt::dispatcher& aDispatcher)
     : m_world(aWorld)
 {
     m_joinedConnection = aDispatcher.sink<ConnectedEvent>().connect<&QuestService::OnConnected>(this);
+    m_disconnectConnection = aDispatcher.sink<DisconnectedEvent>().connect<&QuestService::OnDisconnected>(this);
+    m_partyLeftConnection = aDispatcher.sink<PartyLeftEvent>().connect<&QuestService::OnPartyLeft>(this);
     m_questUpdateConnection = aDispatcher.sink<NotifyQuestUpdate>().connect<&QuestService::OnQuestUpdate>(this);
 
     // A note about the Gameevents:
@@ -167,7 +171,50 @@ BSTEventResult QuestService::OnEvent(const TESQuestStageEvent* apEvent, const Ev
     return BSTEventResult::kOk;
 }
 
+void QuestService::OnDisconnected(const DisconnectedEvent&) noexcept
+{
+    ClearCachedPartyQuestUpdates();
+}
+
+void QuestService::OnPartyLeft(const PartyLeftEvent&) noexcept
+{
+    ClearCachedPartyQuestUpdates();
+}
+
+void QuestService::RememberPartyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
+{
+    m_partyQuestUpdateCache.push_back(aUpdate);
+    if (m_partyQuestUpdateCache.size() > kMaxCachedPartyQuestUpdates)
+        m_partyQuestUpdateCache.erase(m_partyQuestUpdateCache.begin());
+}
+
+size_t QuestService::ReapplyCachedPartyQuestUpdates() noexcept
+{
+    // Guest recovery only: replay NotifyQuestUpdate already received. Does not fetch leader state
+    // (no protocol change) and does not emit RequestQuestUpdate.
+    if (m_partyQuestUpdateCache.empty())
+        return 0;
+
+    size_t applied = 0;
+    // Copy so ApplyQuestUpdate cannot invalidate the cache mid-loop.
+    const Vector<NotifyQuestUpdate> snapshot = m_partyQuestUpdateCache;
+    for (const auto& update : snapshot)
+    {
+        ApplyQuestUpdate(update);
+        ++applied;
+    }
+
+    spdlog::info("Reapplied {} cached party quest update(s) for guest desync recovery", applied);
+    return applied;
+}
+
 void QuestService::OnQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
+{
+    RememberPartyQuestUpdate(aUpdate);
+    ApplyQuestUpdate(aUpdate);
+}
+
+void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
 {
     ModSystem& modSystem = World::Get().GetModSystem();
     uint32_t formId = modSystem.GetGameId(aUpdate.Id);
