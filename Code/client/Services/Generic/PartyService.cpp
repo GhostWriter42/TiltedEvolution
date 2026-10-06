@@ -103,6 +103,8 @@ void PartyService::OnDisconnected(const DisconnectedEvent& acEvent) noexcept
 {
     DestroyParty();
     m_invitations.clear();
+    // The server re-sends NotifyPlayerList on the next connect; don't keep showing the old server's players.
+    m_players.clear();
     m_nextUpdate = 0;
 }
 
