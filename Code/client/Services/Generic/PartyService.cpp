@@ -165,6 +165,11 @@ void PartyService::OnPartyJoined(const NotifyPartyJoined& acPartyJoined) noexcep
     m_leaderPlayerId = acPartyJoined.LeaderPlayerId;
     m_partyMembers = acPartyJoined.PlayerIds;
 
+    // The server only accepts invites from the current leader and consumes them on join
+    // (464efa4c); drop ours too so the debug panel doesn't offer a dead Accept after leaving.
+    if (m_invitations.erase(acPartyJoined.LeaderPlayerId) > 0)
+        spdlog::debug("[PartyService]: Dropped consumed invite from leader {}", acPartyJoined.LeaderPlayerId);
+
     m_world.GetDispatcher().trigger(PartyJoinedEvent(m_isLeader));
 }
 
