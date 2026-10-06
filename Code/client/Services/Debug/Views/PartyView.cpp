@@ -1,4 +1,6 @@
 #include <Services/DebugService.h>
+#include <Services/QuestService.h>
+#include <Services/PartyService.h>
 
 #include <Messages/PartyKickRequest.h>
 #include <Messages/PartyChangeLeaderRequest.h>
@@ -7,8 +9,11 @@
 #include <Messages/PartyLeaveRequest.h>
 #include <Messages/PartyCreateRequest.h>
 #include <Messages/TeleportCommandRequest.h>
+#include <Messages/RequestCurrentWeather.h>
 
 #include <World.h>
+#include <PlayerCharacter.h>
+#include <Forms/TESQuest.h>
 
 #include <imgui.h>
 
@@ -147,5 +152,103 @@ void DebugService::DrawPartyView()
         }
     }
 
+    if (partyService.IsInParty())
+    {
+        ImGui::Separator();
+        ImGui::Text("Guest desync recovery");
+        ImGui::TextWrapped(
+            "Party-safe tools for members who fell behind. Does not pull the leader's quest log "
+            "(no new network opcodes). Re-applies NotifyQuestUpdate already received, refreshes "
+            "party weather, and teleports to the leader. Cannot fix updates you never received, "
+            "scene/dialogue stuck states (#854/#848), or quest-item aliases.");
+
+        auto& questService = m_world.ctx().at<QuestService>();
+        const auto& cache = questService.GetCachedPartyQuestUpdates();
+        ImGui::Text("Cached party quest updates: %zu", cache.size());
+
+        if (ImGui::Button("Re-apply cached party quest updates"))
+        {
+            const size_t applied = questService.ReapplyCachedPartyQuestUpdates();
+            spdlog::info("Guest recovery: reapplied {} cached quest update(s)", applied);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear quest update cache"))
+            questService.ClearCachedPartyQuestUpdates();
+
+        if (!partyService.IsLeader())
+        {
+            if (ImGui::Button("Refresh party weather"))
+            {
+                RequestCurrentWeather request{};
+                m_transport.Send(request);
+            }
+
+            auto leaderEntry = players.find(partyService.GetLeaderPlayerId());
+            if (leaderEntry != players.end())
+            {
+                ImGui::SameLine();
+                if (ImGui::Button("Teleport to leader"))
+                {
+                    TeleportCommandRequest request{};
+                    request.TargetPlayer = leaderEntry.value();
+                    m_transport.Send(request);
+                }
+            }
+            else
+            {
+                ImGui::TextDisabled("Leader name unavailable for teleport.");
+            }
+        }
+        else
+        {
+            ImGui::TextDisabled("Leader: use the Quests debugger for force-setStage; members use this panel.");
+        }
+
+        if (ImGui::CollapsingHeader("Local syncable quest stages (read-only)"))
+        {
+            auto* pPlayer = PlayerCharacter::Get();
+            if (!pPlayer)
+            {
+                ImGui::TextDisabled("No local player.");
+            }
+            else
+            {
+                Set<uint32_t> foundQuests{};
+                int shown = 0;
+                for (auto& objective : pPlayer->objectives)
+                {
+                    TESQuest* pQuest = objective.instance ? objective.instance->quest : nullptr;
+                    if (!pQuest || QuestService::IsNonSyncableQuest(pQuest) || !pQuest->IsActive())
+                        continue;
+                    if (foundQuests.contains(pQuest->formID))
+                        continue;
+                    foundQuests.insert(pQuest->formID);
+                    ImGui::BulletText("%s (%s) stage %u", pQuest->fullName.value.AsAscii(), pQuest->idName.AsAscii(),
+                                      static_cast<unsigned>(pQuest->currentStage));
+                    ++shown;
+                }
+                if (shown == 0)
+                    ImGui::TextDisabled("No active syncable quests on this client.");
+            }
+        }
+
+        if (!cache.empty() && ImGui::CollapsingHeader("Cached NotifyQuestUpdate list"))
+        {
+            for (size_t i = 0; i < cache.size(); ++i)
+            {
+                const auto& u = cache[i];
+                const char* status = "StageUpdate";
+                if (u.Status == NotifyQuestUpdate::Started)
+                    status = "Started";
+                else if (u.Status == NotifyQuestUpdate::Stopped)
+                    status = "Stopped";
+                ImGui::BulletText("#%zu id %08X:%08X stage %u %s", i, u.Id.ModId, u.Id.BaseId,
+                                  static_cast<unsigned>(u.Stage), status);
+            }
+        }
+    }
+
+
     ImGui::End();
 }
+
