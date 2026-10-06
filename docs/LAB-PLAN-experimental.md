@@ -1,4 +1,4 @@
-# Lab test plan: `experimental` @ `7146f55c`
+# Lab test plan: `experimental` (code @ `a09394dd`)
 
 Copied from the shared review BOARD (`## Lab test plan (experimental)`), steps written by STR Quest, STR Party and STR Scenes.
 
@@ -7,7 +7,7 @@ Copied from the shared review BOARD (`## Lab test plan (experimental)`), steps w
 2. Run the server with `sLogLevel=debug`.
 3. **Never ship a client built with that patch.** `experimental` itself stays unpatched. Steps without a log line keep their watch-the-game checks.
 
-Target: `fork/experimental` @ `7146f55c`. Client and server must come from the same build. Format per step: number, clients needed (2 or 3), what the player does, what should happen, and the log line that proves it.
+Target: `fork/experimental`, code @ `a09394dd` (Q1–Q8, P1–P7, S1–S13 written against `7146f55c`; Q9, P8, S14 cover round 4). Client and server must come from the same build. Format per step: number, clients needed (2 or 3), what the player does, what should happen, and the log line that proves it.
 
 ### Quest steps (Q1, Q2, ...)
 
@@ -63,7 +63,14 @@ Build `fork/experimental` @ `7146f55c`; **client and server from the same build*
 - Proof: S-QS `QuestService::OnQuestChanges: updated quest: {:X}, stage: {}, SceneMaster {}, by {} {:X}` for B. The no-party guard itself has no log; pass = no server crash. If the leader vanishes, warn `QuestService::OnQuestChanges: SendToLeader no leader {} found for party, dropping quest: {:X}, stage: {}, status: {}, by {} {:X}` (acceptable, no crash).
 - Not lab-testable with stock clients: null-scene guard (1c189625, pass = no crash during Q5) and the unknown-status drop (a1768632; error `QuestService::OnQuestChanges: unknown quest status {}, dropping quest: {:X}, stage: {}, by {} {:X}` should never appear).
 
-Lab-only, not on experimental: party-wide scene-end broadcast `d3fb4bc6` (3 clients), see **STR Quest — lab-only: party-wide scene-end stage broadcast**; Started-case echo gap (a Re-apply Started record lingers ≤5 s when `ScriptSetStage` is filtered).
+**Q9 Filtered Re-apply Started leaves no echo record (round 4, `8107edb9`, staged as `24a07d59`).** Clients: 2. Needs the debug-logging client.
+- Setup: B is in A's party with a cached leader Started entry for quest Q at stage N. On B, console `stopquest` Q so that B's current stage is N (or a later stage with N already done).
+- Player does: B presses Re-apply, then within 5 s really restarts Q (`startquest` or `setstage`).
+- Expected: Re-apply is filtered and records nothing, so B's real restart is sent.
+- Proof: C-QS (B) warn `TESQuest::ScriptSetStage: returned false quest formId {:X}, currentStage {}, newStage {}, name {}` on Re-apply; then info `QuestService::OnEvent: started {} formId: {:X}, questStage: {}, questType: {}, flags: {:X}, {} {}, name: {}` for Q, with NO debug `QuestService::OnEvent: suppressing resync echo start/stop formId: {:X}, started: {}, player {}` for Q. S-QS `QuestService::OnQuestChanges: SendToLeader quest: {:X}, stage: {}, status: {}, by {} {:X}` from B. Before `8107edb9` the restart was swallowed.
+- Reset case unchanged (engine-internal events): if `REPORT THIS LOG, experimental remote reset` shows during Re-apply, capture any suppress lines in the next 5 s.
+
+Lab-only, not on experimental: party-wide scene-end broadcast `d3fb4bc6` (3 clients), see **STR Quest — lab-only: party-wide scene-end stage broadcast**; remaining Started-case gap (filter passes but Papyrus `SetCurrentStageID` returns false: record lingers ≤5 s) and the Reset-case record.
 
 ### Party steps (P1, P2, ...)
 
@@ -111,6 +118,12 @@ Build `fork/experimental` @ `7146f55c`. **Server log level debug**: every server
 - Player does: B disconnects, opens the Party panel while offline, reconnects, and is invited again.
 - Expected: no crash in the panel while offline. After reconnect, A's **Other Players** shows only currently online players. The leader is shown correctly once B joins.
 - Proof: C-PS (B) `[PartyService]: Joined party. LeaderId: {}, IsLeader: {}` with A's id. The leader id `-1` init and the cleared player list have **no log line**: observe the debug Party panel. The warn `[PartyService]: WorldEncountersEnabled global (0xB8EC1) not found` should **never** appear on a normal load order (regression check only; it can't be triggered without breaking Skyrim.esm).
+
+**P8 Client drops a consumed invite on join (4c90a1e9, was ba0ce4be).** Clients: 2. Needs the lab debug-logging client.
+- Setup: A and B are online; A creates a party.
+- Player does: A invites B. B accepts, then B presses **Leave**.
+- Expected: B's Party panel no longer lists A's invite (no dead **Accept**).
+- Proof: C-PS (B) `[PartyService]: Joined party. LeaderId: {}, IsLeader: {}` followed by `[PartyService]: Dropped consumed invite from leader {}` with A's id.
 
 **Known lab-only notes (not regressions):**
 - After a kick, the kicked player is missing from the other players' **Other Players** list until the next join or leave. This is old behaviour: `OnPartyKick` calls `BroadcastPlayerList(pKick)`. The fix would change message routing, so it's parked.
@@ -190,6 +203,10 @@ Build `fork/experimental` @ `7146f55c`. Roles: A = leader (owns the NPCs in the 
 **S13 Watch items (observation only, not pass/fail).** [2 clients]
 - (a) **The 30 s backstop cutting off a game-started subtitle.** On B, a subtitle the game shows by itself for an NPC A owns (for example a line from B's local copy of a scene, which raises no local subtitle event on B) vanishes early, at the moment B logs [debug] `CharacterService::RunSubtitleTimeouts: hiding expired synced subtitle, formId {:X}`, about 30 s after an earlier `showing subtitle` for the same actor. Record the actor, scene and timing.
 - (b) **The #896 owning client echoes a member-voiced line back once.** B voices an NPC that A owns. Signs on A: [debug] `CharacterService::OnNotifyDialogue: playing dialogue ...` or `CharacterService::OnNotifySubtitle: showing subtitle ...`, followed by A's own `CharacterService::OnDialogueEvent: ...` or `CharacterService::OnSubtitleEvent: ...` line with `isLocal true` and `willSync true` for the same soundFile or subtitle. B then logs `playing dialogue` / `showing subtitle` for its own line (heard as a restart, or seen as a repeated subtitle). Record how often it happens.
-- (c) **Known gap, not pass/fail: a re-applied Started entry can swallow a quick restart.** If a cached Started entry couldn't apply during Re-apply (the quest was already stopped or completed with that stage done), and B starts that quest within 5 s, B's start event and that stage event are swallowed. B logs [debug] `QuestService::OnEvent: suppressing resync echo start/stop formId: {:X}, started: {}, player {}` (with `started: true`) and `QuestService::OnEvent: suppressing resync echo stage formId: {:X}, questStage: {}, player {}`, while the server shows no `QuestService::OnQuestChanges:` line for that start. Workaround: don't start quests for 5 s after Re-apply.
+- (c) **Known gap, not pass/fail: a re-applied Started entry can swallow a quick restart.** If a cached Started entry couldn't apply during Re-apply (the quest was already stopped or completed with that stage done), and B starts that quest within 5 s, B's start event and that stage event are swallowed. B logs [debug] `QuestService::OnEvent: suppressing resync echo start/stop formId: {:X}, started: {}, player {}` (with `started: true`) and `QuestService::OnEvent: suppressing resync echo stage formId: {:X}, questStage: {}, player {}`, while the server shows no `QuestService::OnQuestChanges:` line for that start. Workaround: don't start quests for 5 s after Re-apply. Narrowed by Quest round 4 (`24a07d59`); see Q9 for the current check and what remains.
 
-
+**S14 Null/empty sound path guard in `HookSpeakSoundFunction` (a09394dd, originally afff6fab). Regression check.** [2 clients, lab debug-logging client build]
+- Setup: A and B are in a party near NPCs A owns. Include a quest NPC with voiced lines and some silent or "no voice" lines (for example a follower command menu, or a mod NPC without voice files).
+- Player does: repeat S1. A talks to the NPC and lets ambient NPC chatter play. Then trigger a few silent lines.
+- Expected: voiced lines still sync exactly as in S1. Neither client crashes during NPC speech, including silent lines. The fix has no log line of its own.
+- Proof: on B, every synced line still logs [debug] `CharacterService::OnNotifyDialogue: playing dialogue Actor {:X}, serverId {:X}, isLeader {}, name {}, soundFile {}` with a non-empty soundFile, and A never logs `CharacterService::OnDialogueEvent: ...` with an empty `soundFile`.

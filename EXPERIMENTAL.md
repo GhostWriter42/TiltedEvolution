@@ -3,8 +3,8 @@
 This is an **unofficial** experimental integration branch on the
 [GhostWriter42 fork](https://github.com/GhostWriter42/TiltedEvolution) of Skyrim Together Reborn.
 It is not an upstream branch. It is built from upstream `dev` at `9ce2971` and stacks open upstream
-PRs plus local stability fixes on top. The current tip, `7146f55c`, is compile-green on Windows
-(MSVC 2022, xmake 3.1.1, `releasedbg`, all targets). It has **not been tested in-game yet**.
+PRs plus local stability fixes on top. The code at `a09394dd` is compile-green on Windows
+(MSVC 2022, xmake 3.1.1, `releasedbg`, all targets); later commits are docs only. It has **not been tested in-game yet**.
 
 > **Warning: the client and server must come from the same build of this branch.** #848 inserts new
 > message opcodes mid-enum, which shifts the numbering. A client from this branch can't talk to an
@@ -36,6 +36,8 @@ this branch, and each one is listed with its short SHA on `experimental`.
 - `c95039a6`: resync echo records are cleared on disconnect and party leave.
 - `7146f55c`: no resync echo record for a remote Stopped. StopQuest fires no event, so a stale record
   could swallow the next real stop (bug found in cross-review).
+- `24a07d59`: no resync echo record for a remote Start that `ScriptSetStage` will filter (stage already
+  current or done), so a stale record can't swallow a real restart.
 
 ### Party / world
 
@@ -57,6 +59,8 @@ this branch, and each one is listed with its short SHA on `experimental`.
 - `56c0c78c`: the client PartyService initialises the leader id and clears the player list on disconnect.
 - `464efa4c`: the server consumes a party invite on accept, so it can't be reused after leaving.
 - `87556706`: the server rejects an expired invite on accept, without waiting for the periodic purge.
+- `4c90a1e9`: the client drops its copy of an invite once it joins that leader's party, so the debug
+  panel no longer offers a dead Accept.
 
 ### Dialogue / scenes
 
@@ -72,6 +76,8 @@ this branch, and each one is listed with its short SHA on `experimental`.
 - `62f2f7ba`: drops synced subtitles and the dedup state on disconnect.
 - `a22e586f`: receive-side guards in NotifyDialogue and NotifySubtitle (deleted actors, empty sound
   file, local player).
+- `a09394dd`: `HookSpeakSoundFunction` no longer builds a DialogueEvent from a null or empty sound path
+  (a null path would crash).
 
 ### Build fix
 
@@ -100,9 +106,8 @@ this branch, and each one is listed with its short SHA on `experimental`.
 - **Stage-step `983e98c`:** superseded by #848's server `QuestStageDedupHistory`.
 - **[#839](https://github.com/tiltedphoques/TiltedEvolution/pull/839):** dropped because #848
   supersedes it. Both implement the same duplicate start/stop suppression, and #848's version wins.
-- **Started-case resync echo gap (lab only):** if `ScriptSetStage` is filtered during Re-apply, the
-  `(S, Started)` record stays for 5 s and can swallow a real restart. Retracting it is unsafe until a
-  lab confirms the Papyrus case.
+- **Started-case resync echo gap (lab only, narrowed by `24a07d59`):** the filtered case is fixed; what
+  remains is Papyrus returning false after the filter passes, plus the Reset-case record. Both need a lab.
 
 ## Known risks
 
@@ -110,7 +115,8 @@ this branch, and each one is listed with its short SHA on `experimental`.
   Unit tests are built but haven't been run.
 - The #846 rule also stops a member's real, intentional quest fail from spreading to the party.
 - The resync echo guard could still swallow one real event within 5 s. Records are cleared on
-  disconnect and leave, and the Stopped case is fixed in `7146f55c`, but the Started-case gap remains.
+  disconnect and leave, the Stopped case is fixed in `7146f55c` and the filtered Started case in `24a07d59`; the
+  Papyrus-false Started case and the Reset record remain (lab only).
 - The Scenes dialogue dedup remembers only the last line, so interleaved speakers (A, B, A) can still
   repeat.
 - Party invites now really expire after 60 s and are used up on accept (an intended behaviour change).
