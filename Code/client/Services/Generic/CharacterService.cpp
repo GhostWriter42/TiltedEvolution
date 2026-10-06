@@ -908,9 +908,18 @@ void CharacterService::OnNotifyRespawn(const NotifyRespawn& acMessage) const noe
 
 void CharacterService::OnBeastFormChange(const BeastFormChangeEvent& acEvent) const noexcept
 {
+    // Beast-form detection runs every frame regardless of connection state.
+    if (!m_transport.IsConnected())
+        return;
+
     auto view = m_world.view<FormIdComponent>();
 
     const auto it = std::find_if(view.begin(), view.end(), [view](auto entity) { return view.get<FormIdComponent>(entity).Id == 0x14; });
+    if (it == view.end())
+    {
+        spdlog::warn(__FUNCTION__ ": local player entity not found");
+        return;
+    }
 
     std::optional<uint32_t> serverIdRes = Utils::GetServerId(*it);
     if (!serverIdRes.has_value())
