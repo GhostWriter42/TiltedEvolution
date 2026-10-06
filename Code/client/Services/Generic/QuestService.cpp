@@ -476,9 +476,16 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
             miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type), pQuest->IsStopped(),
             pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
 
-        if (m_isResyncing && aUpdate.Stage != pQuest->currentStage)
-            ExpectResyncEcho(formId, aUpdate.Stage, true, kEchoNone);
-        wasUpdated = pQuest->ScriptSetStage(aUpdate.Stage);
+        // Same-stage updates (dedup TTL expiry, SceneEnd poke to players already current) are a no-op;
+        // ScriptSetStage() would filter them anyway but log warn + the error below.
+        if (aUpdate.Stage == pQuest->currentStage)
+            wasUpdated = true;
+        else
+        {
+            if (m_isResyncing)
+                ExpectResyncEcho(formId, aUpdate.Stage, true, kEchoNone);
+            wasUpdated = pQuest->ScriptSetStage(aUpdate.Stage);
+        }
         break;
 
     case NotifyQuestUpdate::Stopped:
@@ -493,12 +500,12 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
         break;
 
     default:
-        break;
         spdlog::error(
             __FUNCTION__ ": unknown remote status {} {} formId: {:X}, questStage: {}, "
                          "questType: {}, isStopped: {}, flags: {:X}, {} {}, name: {}",
             aUpdate.Status, miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type),
             pQuest->IsStopped(), pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
+        return;
     }
 
     if (!wasUpdated)
