@@ -9,6 +9,7 @@
 
 #include <Games/References.h>
 #include <Games/Misc/SubtitleManager.h>
+#include <Games/Misc/MenuTopicManager.h>
 
 #include <Forms/TESNPC.h>
 #include <Interface/UI.h>
@@ -1108,17 +1109,21 @@ void CharacterService::OnDialogueEvent(const DialogueEvent& acEvent) noexcept
         return;
 
     bool isLocal = pActor->GetExtension()->IsLocal();
+    const bool isPlayerDialogueSpeaker = MenuTopicManager::IsPlayerDialogueSpeaker(pActor);
     bool isInScene = pActor->IsInScene();
-    auto sceneId = isInScene ? pActor->GetCurrentScene()->formID : 0;
+    auto* pScene = isInScene ? pActor->GetCurrentScene() : nullptr;
+    auto sceneId = pScene ? pScene->formID : 0;
     bool isTaskDialogue = pActor->IsTalking() && pActor->IsInDialogueWithPlayer();
     bool isSpeakingInScene = pActor->IsSpeakingInScene();
 
-    const bool willSync = isTaskDialogue || isLocal && !isInScene;
+    // #854: don't sync in-scene non-TaskDialogue (Leader audio cancels member scene copies).
+    // #896: also allow the conversation player's speaker when they don't own the NPC.
+    const bool willSync = isTaskDialogue || ((isLocal || isPlayerDialogueSpeaker) && !isInScene);
 
     spdlog::debug(
-        __FUNCTION__ ": isLocal {}, isInScene {}, isSpeakingInScene {}, isTaskDialogue {}, willSync {}, scene {:X}, Actor "
+        __FUNCTION__ ": isLocal {}, isPlayerDialogueSpeaker {}, isInScene {}, isSpeakingInScene {}, isTaskDialogue {}, willSync {}, scene {:X}, Actor "
                      "{:X}, serverId {:X}, isLeader {}, name {}, soundFile {}",
-        isLocal, isInScene, isSpeakingInScene, isTaskDialogue, willSync, sceneId, pActor->formID, serverIdRes.value(), isLeader, pActor->baseForm->GetName(),
+        isLocal, isPlayerDialogueSpeaker, isInScene, isSpeakingInScene, isTaskDialogue, willSync, sceneId, pActor->formID, serverIdRes.value(), isLeader, pActor->baseForm->GetName(),
         acEvent.VoiceFile);
 
     if (willSync)
@@ -1175,17 +1180,20 @@ void CharacterService::OnSubtitleEvent(const SubtitleEvent& acEvent) noexcept
         return;
 
     bool isLocal = pActor->GetExtension()->IsLocal();
+    const bool isPlayerDialogueSpeaker = MenuTopicManager::IsPlayerDialogueSpeaker(pActor);
     bool isInScene = pActor->IsInScene();
     auto isSpeakingInScene = pActor->IsSpeakingInScene();
-    auto sceneId = isInScene ? pActor->GetCurrentScene()->formID : 0;
+    auto* pScene = isInScene ? pActor->GetCurrentScene() : nullptr;
+    auto sceneId = pScene ? pScene->formID : 0;
     bool isTaskDialogue = pActor->IsTalking() && pActor->IsInDialogueWithPlayer();
 
-    const bool willSync = isTaskDialogue || isLocal && !isInScene;
+    // #854 scene gate + #896 speaker gate (same as OnDialogueEvent).
+    const bool willSync = isTaskDialogue || ((isLocal || isPlayerDialogueSpeaker) && !isInScene);
 
     spdlog::debug(
-        __FUNCTION__ ": isLocal {}, isInScene {}, isSpeakingInScene {}, isTaskDialogue {}, willSync {}, scene {:X}, Actor "
+        __FUNCTION__ ": isLocal {}, isPlayerDialogueSpeaker {}, isInScene {}, isSpeakingInScene {}, isTaskDialogue {}, willSync {}, scene {:X}, Actor "
                      "{:X}, serverId {:X}, isLeader {}, name {}, subtitle {}",
-        isLocal, isInScene, isSpeakingInScene, isTaskDialogue, willSync, sceneId, pActor->formID, serverIdRes.value(), isLeader, pActor->baseForm->GetName(),
+        isLocal, isPlayerDialogueSpeaker, isInScene, isSpeakingInScene, isTaskDialogue, willSync, sceneId, pActor->formID, serverIdRes.value(), isLeader, pActor->baseForm->GetName(),
         acEvent.Text);
 
     if (willSync)
