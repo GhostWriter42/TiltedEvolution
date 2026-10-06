@@ -67,7 +67,7 @@ PartyService::Party* PartyService::GetPlayerParty(Player* const apPlayer) noexce
         // find(), not operator[]: a stale JoinedPartyId must not create an empty phantom party.
         auto itor = m_parties.find(*inviterPartyComponent.JoinedPartyId);
         if (itor != std::end(m_parties))
-            return &itor->second;
+            return &itor.value();
     }
 
     return nullptr;
@@ -378,7 +378,7 @@ void PartyService::RemovePlayerFromParty(Player* apPlayer) noexcept
         if (partyItor == std::end(m_parties))
             spdlog::warn("[PartyService]: Player {} had stale party id {}, clearing it.", apPlayer->GetId(), id);
         else
-            RemoveMemberFromParty(partyItor->second, id, apPlayer);
+            RemoveMemberFromParty(partyItor.value(), id, apPlayer);
 
         pPartyComponent->JoinedPartyId.reset();
 
