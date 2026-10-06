@@ -376,7 +376,11 @@ bool QuestService::ConsumeResyncEcho(uint32_t aFormId, uint16_t aStage, bool aIs
 
 void QuestService::OnQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
 {
-    RememberPartyQuestUpdate(aUpdate);
+    // Only cache while in a party (ApplyQuestUpdate ignores the update otherwise). A NotifyQuestUpdate
+    // still in flight when we leave would land in the just-cleared cache (OnPartyLeft) and be replayed
+    // by guest Resync into the next party.
+    if (m_world.GetPartyService().IsInParty())
+        RememberPartyQuestUpdate(aUpdate);
     ApplyQuestUpdate(aUpdate);
 }
 
