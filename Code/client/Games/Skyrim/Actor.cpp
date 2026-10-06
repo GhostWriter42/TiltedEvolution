@@ -1224,7 +1224,10 @@ float TP_MAKE_THISCALL(HookSpeakSoundFunction, Actor, const char* apName, uint32
     // The player having the conversation may not own this NPC. Ambient
     // speech still comes only from the actor's simulation owner.
     // #854 scene filtering happens later in CharacterService::OnDialogueEvent (willSync).
-    if (apThis->GetExtension()->IsLocal() || MenuTopicManager::IsPlayerDialogueSpeaker(apThis))
+    // apName comes from the engine; building DialogueEvent's String from a null pointer would crash,
+    // and an empty path has nothing to play remotely (receivers drop it), so only sync a real path.
+    const bool hasSoundPath = apName && *apName;
+    if (hasSoundPath && (apThis->GetExtension()->IsLocal() || MenuTopicManager::IsPlayerDialogueSpeaker(apThis)))
         World::Get().GetRunner().Trigger(DialogueEvent(apThis->formID, apName));
 
     return TiltedPhoques::ThisCall(RealSpeakSoundFunction, apThis, apName, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
