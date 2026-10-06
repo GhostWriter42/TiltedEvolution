@@ -5,6 +5,8 @@
 #include <Games/Events.h>
 #include <Messages/NotifyQuestUpdate.h>
 
+struct NotifyQuestSceneUpdate;
+
 struct TESQuest;
 struct ConnectedEvent;
 struct DisconnectedEvent;
@@ -12,10 +14,8 @@ struct PartyLeftEvent;
 
 /**
  * @brief Handles quest sync
- *
- * This service is currently not in use.
  */
-class QuestService final : public BSTEventSink<TESQuestStartStopEvent>, BSTEventSink<TESQuestStageEvent>
+class QuestService final : public BSTEventSink<TESQuestStartStopEvent>, BSTEventSink<TESQuestStageEvent>, BSTEventSink<TESSceneEvent>, BSTEventSink<TESSceneActionEvent>, BSTEventSink<TESScenePhaseEvent>
 {
 public:
     QuestService(World&, entt::dispatcher&);
@@ -24,6 +24,7 @@ public:
     static bool IsNonSyncableQuest(TESQuest* apQuest);
     static void DebugDumpQuests();
     static bool StopQuest(uint32_t aformId);
+    const uint32_t PlayerId() const noexcept { return m_playerId; }
 
     /** Party-safe guest recovery: re-apply NotifyQuestUpdate messages already received (no new net traffic). */
     size_t ReapplyCachedPartyQuestUpdates() noexcept;
@@ -34,18 +35,26 @@ private:
     friend struct QuestEventHandler;
 
     void OnConnected(const ConnectedEvent&) noexcept;
-    void OnDisconnected(const DisconnectedEvent&) noexcept;
+    void OnDisconnected(const DisconnectedEvent&) noexcept; // also clears m_playerId (#848 Disconnected folded in)
     void OnPartyLeft(const PartyLeftEvent&) noexcept;
 
     BSTEventResult OnEvent(const TESQuestStartStopEvent*, const EventDispatcher<TESQuestStartStopEvent>*) override;
     BSTEventResult OnEvent(const TESQuestStageEvent*, const EventDispatcher<TESQuestStageEvent>*) override;
-
+    BSTEventResult OnEvent(const TESSceneEvent*, const EventDispatcher<TESSceneEvent>*) override;
+#if 1
+    BSTEventResult OnEvent(const TESSceneActionEvent*, const EventDispatcher<TESSceneActionEvent>*) override;
+    BSTEventResult OnEvent(const TESScenePhaseEvent*, const EventDispatcher<TESScenePhaseEvent>*) override;
+#endif
     void OnQuestUpdate(const NotifyQuestUpdate&) noexcept;
     void ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept;
     void RememberPartyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept;
     void NotifyOverlayOfQuestUpdate(uint32_t aFormId) noexcept;
+    void OnQuestSceneUpdate(const NotifyQuestSceneUpdate&) noexcept;
+
+    bool CanAdvanceQuestForParty() const noexcept;
 
     World& m_world;
+    uint32_t m_playerId;
 
     static constexpr size_t kMaxCachedPartyQuestUpdates = 64;
     Vector<NotifyQuestUpdate> m_partyQuestUpdateCache;
@@ -55,4 +64,5 @@ private:
     entt::scoped_connection m_questUpdateConnection;
     entt::scoped_connection m_disconnectConnection;
     entt::scoped_connection m_partyLeftConnection;
+    entt::scoped_connection m_questSceneUpdateConnection;
 };
