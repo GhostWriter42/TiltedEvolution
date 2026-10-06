@@ -196,6 +196,11 @@ BSTEventResult QuestService::OnEvent(const TESSceneEvent* apEvent, const EventDi
 {
     GameId Id;
     auto pScene = Cast<BGSScene>(TESForm::GetById(apEvent->sceneFormId));
+    if (!pScene) // Also reached via the synthesized event from OnEvent(TESScenePhaseEvent)
+    {
+        spdlog::debug(__FUNCTION__ "::TESSceneEvent*: no scene for formId {:X}", apEvent->sceneFormId);
+        return BSTEventResult::kOk;
+    }
     auto pQuest = pScene->owningQuest;
     if (pQuest == nullptr || QuestService::IsNonSyncableQuest(pQuest) || !m_world.Get().GetPartyService().IsInParty() || !m_world.GetModSystem().GetServerModId(pQuest->formID, Id))
         return BSTEventResult::kOk;

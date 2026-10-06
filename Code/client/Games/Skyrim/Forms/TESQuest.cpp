@@ -159,7 +159,7 @@ bool TESQuest::IsAnyCutscenePlaying()
 {
     for (const auto& scene : scenes)
     {
-        if (scene->isPlaying)
+        if (scene && scene->isPlaying)
             return true;
     }
     return false;
