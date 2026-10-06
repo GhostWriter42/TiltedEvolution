@@ -212,6 +212,7 @@ void QuestService::OnQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
     case NotifyQuestUpdate::Stopped:
         if (pQuest->getState() == TESQuest::State::Stopped) // Supress duplicate or loopback quest stop
         {
+            bResult = true; // already stopped counts as success
             spdlog::info(__FUNCTION__ ": suppressing duplicate quest stop gameId: {:X}, questStage: {}, questStatus: {}, questType: {}, formId: {:X}, name: {}",
                          aUpdate.Id.LogFormat(), aUpdate.Stage, aUpdate.Status, aUpdate.ClientQuestType, formId, pQuest->fullName.value.AsAscii());
         }
@@ -221,7 +222,6 @@ void QuestService::OnQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
             spdlog::info(__FUNCTION__ ": remote quest stopped gameId: {:X}, questStage: {}, questStatus: {}, questType: {}, formId: {:X}, name: {}",
                          aUpdate.Id.LogFormat(), aUpdate.Stage, aUpdate.Status, aUpdate.ClientQuestType, formId, pQuest->fullName.value.AsAscii());
         }
-        bResult = true;
         break;
     default: break;
     }
