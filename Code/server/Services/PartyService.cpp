@@ -402,6 +402,16 @@ void PartyService::RemoveMemberFromParty(Party& aParty, const uint32_t aPartyId,
         return;
     }
 
+    // A departed SceneMaster would otherwise stay set: no one else can send the SceneEnd
+    // fan-out/forced stage, and a re-Begin of the same scene would not elect a new master.
+    // Clearing lets the next scene Begin from a remaining member take over (QuestService).
+    auto& dedupHistory = aParty.GetQuestStageDedupHistory();
+    if (dedupHistory.GetSceneMaster() == apPlayer->GetId())
+    {
+        spdlog::debug("[PartyService]: SceneMaster {} left party {}, clearing SceneMaster.", apPlayer->GetId(), aPartyId);
+        dedupHistory.ResetSceneMaster();
+    }
+
     if (aParty.LeaderPlayerId == apPlayer->GetId())
     {
         aParty.LeaderPlayerId = members.front()->GetId(); // Reassign party leader
