@@ -311,8 +311,17 @@ void PartyService::OnPartyAcceptInvite(const PacketEvent<PartyAcceptInviteReques
         auto& selfPartyComponent = pSelf->GetParty();
 
         // Check if we have this invitation so people don't invite themselves
-        if (selfPartyComponent.Invitations.count(pInviter) == 0)
+        const auto inviteItor = selfPartyComponent.Invitations.find(pInviter);
+        if (inviteItor == std::end(selfPartyComponent.Invitations))
             return;
+
+        // OnUpdate only purges expired invites every 10 s; reject an expired one here too.
+        if (inviteItor->second < GameServer::Get()->GetTick())
+        {
+            spdlog::debug("[PartyService]: Invite expired, cancelling.");
+            selfPartyComponent.Invitations.erase(pInviter);
+            return;
+        }
 
         spdlog::debug("[PartyService]: Invite found, processing.");
         if (!inviterPartyComponent.JoinedPartyId) // Ensure inviter is in a party otherwise break
