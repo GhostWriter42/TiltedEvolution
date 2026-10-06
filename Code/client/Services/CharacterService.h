@@ -41,6 +41,7 @@ struct NotifyActorTeleport;
 struct PartyJoinedEvent;
 struct PartyLeftEvent;
 struct NotifyPlayerLeft;
+struct NotifyPartyInfo;
 
 struct Actor;
 struct World;
@@ -88,6 +89,7 @@ struct CharacterService
     void OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept;
     void OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept;
     void OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept;
+    void OnPartyInfo(const NotifyPartyInfo& acPartyInfo) noexcept;
 
     void ProcessNewEntity(entt::entity aEntity) const noexcept;
 
@@ -104,6 +106,8 @@ private:
     [[nodiscard]] bool AllRemotePlayersArePartyMembers() const noexcept;
     void ClearRemoteOwnerPlayerId(uint32_t aOwnerPlayerId) noexcept;
     void ClearAllRemoteOwnerPlayerIds() noexcept;
+    void InvalidateRemoteOwnersNotInParty(const Vector<uint32_t>& acPartyPlayerIds) noexcept;
+    void ReclaimRemoteActorsAsLeader() const noexcept;
 
     Actor* CreateCharacterForEntity(entt::entity aEntity) const noexcept;
     ActorData BuildActorData(Actor* apActor) const noexcept;
@@ -171,4 +175,5 @@ private:
     entt::scoped_connection m_partyJoinedConnection;
     entt::scoped_connection m_partyLeftConnection;
     entt::scoped_connection m_playerLeftConnection;
+    entt::scoped_connection m_partyInfoConnection;
 };

@@ -48,6 +48,7 @@
 #include <Messages/NotifyFactionsChanges.h>
 #include <Messages/NotifyRemoveCharacter.h>
 #include <Messages/NotifyPlayerLeft.h>
+#include <Messages/NotifyPartyInfo.h>
 #include <Messages/RequestOwnershipTransfer.h>
 #include <Messages/NotifyOwnershipTransfer.h>
 #include <Messages/RequestOwnershipClaim.h>
@@ -112,6 +113,7 @@ CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher,
     m_partyJoinedConnection = aDispatcher.sink<PartyJoinedEvent>().connect<&CharacterService::OnPartyJoinedEvent>(this);
     m_partyLeftConnection = aDispatcher.sink<PartyLeftEvent>().connect<&CharacterService::OnPartyLeftEvent>(this);
     m_playerLeftConnection = aDispatcher.sink<NotifyPlayerLeft>().connect<&CharacterService::OnPlayerLeft>(this);
+    m_partyInfoConnection = aDispatcher.sink<NotifyPartyInfo>().connect<&CharacterService::OnPartyInfo>(this);
 }
 
 void CharacterService::DeleteRemoteEntityComponents(entt::entity aEntity) const noexcept
@@ -1228,6 +1230,27 @@ void CharacterService::ClearAllRemoteOwnerPlayerIds() noexcept
         view.get<RemoteComponent>(entity).OwnerPlayerId = 0;
 }
 
+void CharacterService::InvalidateRemoteOwnersNotInParty(const Vector<uint32_t>& acPartyPlayerIds) noexcept
+{
+    auto view = m_world.view<RemoteComponent>();
+    for (auto entity : view)
+    {
+        auto& remote = view.get<RemoteComponent>(entity);
+        if (remote.OwnerPlayerId == 0)
+            continue;
+        if (std::find(acPartyPlayerIds.begin(), acPartyPlayerIds.end(), remote.OwnerPlayerId) == acPartyPlayerIds.end())
+            remote.OwnerPlayerId = 0;
+    }
+}
+
+void CharacterService::ReclaimRemoteActorsAsLeader() const noexcept
+{
+    auto view = m_world.view<FormIdComponent>(entt::exclude<ObjectComponent>);
+    Vector<entt::entity> entities(view.begin(), view.end());
+    for (auto entity : entities)
+        ProcessNewEntity(entity);
+}
+
 void CharacterService::OnPartyLeftEvent(const PartyLeftEvent&) noexcept
 {
     // Drop stale party-owner hints so a later party join can use the single-party heuristic again.
@@ -1237,20 +1260,28 @@ void CharacterService::OnPartyLeftEvent(const PartyLeftEvent&) noexcept
 void CharacterService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 {
     // Owner disconnected: forget their id until a fresh NotifyOwnershipTransfer arrives.
+    // Server already reassigns via OwnershipTransferEvent -> TransferToNextOwner.
     ClearRemoteOwnerPlayerId(acMessage.PlayerId);
+}
+
+void CharacterService::OnPartyInfo(const NotifyPartyInfo& acPartyInfo) noexcept
+{
+    if (!m_world.GetPartyService().IsInParty())
+        return;
+
+    // Use the message's member list (not PartyService state) so sink order does not matter.
+    InvalidateRemoteOwnersNotInParty(acPartyInfo.PlayerIds);
+
+    // Leader change / party roster update: new leader re-evaluates claims; non-leaders no longer claim.
+    if (acPartyInfo.IsLeader)
+        ReclaimRemoteActorsAsLeader();
 }
 
 void CharacterService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept
 {
     // Takes ownership of all actors
     if (acEvent.IsLeader)
-    {
-        auto view = m_world.view<FormIdComponent>(entt::exclude<ObjectComponent>);
-        Vector<entt::entity> entities(view.begin(), view.end());
-
-        for (auto entity : entities)
-            ProcessNewEntity(entity);
-    }
+        ReclaimRemoteActorsAsLeader();
 }
 
 void CharacterService::MoveActor(const Actor* apActor, const GameId& acWorldSpaceId, const GameId& acCellId, const Vector3_NetQuantize& acPosition) const noexcept
@@ -1313,7 +1344,7 @@ void CharacterService::ProcessNewEntity(entt::entity aEntity) const noexcept
             }
             else
             {
-                spdlog::info(
+                spdlog::debug(
                     "Skipping ownership claim for actor {:X} server id {:X}: owner player {:X} is outside this party (or multi-party peers are present)",
                     pActor->formID, pRemoteComponent->Id, ownerPlayerId);
             }
