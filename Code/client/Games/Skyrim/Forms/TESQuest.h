@@ -120,6 +120,7 @@ struct TESQuest : BGSStoryManagerTreeForm
     inline bool IsEnabled() const { return flags & Flags::Enabled; }
     inline bool IsActive() const { return flags & Flags::Active; }
     inline bool IsStopped() const { return (flags & (Flags::Enabled | Flags::StageWait)) == 0; } // & 0x81
+    inline bool IsCompleted() const { return (flags & Flags::Completed) != 0; }
 
     bool Kill();
     State getState();
