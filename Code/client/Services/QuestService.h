@@ -5,6 +5,9 @@
 #include <Games/Events.h>
 #include <Messages/NotifyQuestUpdate.h>
 
+#include <chrono>
+#include <mutex>
+
 struct NotifyQuestSceneUpdate;
 
 struct TESQuest;
@@ -58,6 +61,32 @@ private:
 
     static constexpr size_t kMaxCachedPartyQuestUpdates = 64;
     Vector<NotifyQuestUpdate> m_partyQuestUpdateCache;
+
+    // Resync echo guard: game quest events caused by ReapplyCachedPartyQuestUpdates() must not be
+    // re-emitted as RequestQuestUpdate (cached updates can be older than the server's 30s dedup).
+    // The events may fire synchronously or later on another thread (thread_local ScopedQuestOverride
+    // misses those), so expected echoes are recorded per quest (formId + stage), consumed once by
+    // the matching OnEvent, and expire after kResyncEchoWindow.
+    static constexpr uint8_t kEchoNone = 0;
+    static constexpr uint8_t kEchoStarted = 1 << 0;
+    static constexpr uint8_t kEchoStopped = 1 << 1;
+    struct ResyncEcho
+    {
+        uint32_t FormId;
+        uint16_t Stage;
+        bool StageEcho;
+        uint8_t StartStopMask; // kEchoStarted / kEchoStopped
+        std::chrono::steady_clock::time_point Expiry;
+    };
+    static constexpr std::chrono::milliseconds kResyncEchoWindow{5000};
+    void ExpectResyncEcho(uint32_t aFormId, uint16_t aStage, bool aStageEcho, uint8_t aStartStopMask) noexcept;
+    bool ConsumeResyncStageEcho(uint32_t aFormId, uint16_t aStage) noexcept;
+    bool ConsumeResyncStartStopEcho(uint32_t aFormId, bool aStarted) noexcept;
+    bool ConsumeResyncEcho(uint32_t aFormId, uint16_t aStage, bool aIsStageEvent, bool aStarted) noexcept;
+
+    bool m_isResyncing{false};
+    std::mutex m_resyncEchoMutex;
+    Vector<ResyncEcho> m_resyncEchoes;
 
     entt::scoped_connection m_joinedConnection;
     entt::scoped_connection m_leftConnection;

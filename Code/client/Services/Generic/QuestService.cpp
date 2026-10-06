@@ -88,6 +88,12 @@ BSTEventResult QuestService::OnEvent(const TESQuestStartStopEvent* apEvent,
         return BSTEventResult::kOk;
     }
 
+    if (ConsumeResyncStartStopEcho(apEvent->formId, apEvent->started))
+    {
+        spdlog::debug(__FUNCTION__ ": suppressing resync echo start/stop formId: {:X}, started: {}, player {}", apEvent->formId, apEvent->started, PlayerId());
+        return BSTEventResult::kOk;
+    }
+
     const auto startStop = pQuest->IsStopped() ? "stopped" : "started";
     const bool isMiscNone = (pQuest->type == TESQuest::Type::None || pQuest->type == TESQuest::Type::Miscellaneous);
     const TiltedPhoques::String miscQuest(isMiscNone ? spdfmt::format("none/misc quest gameId {:X}", Id.LogFormat()) : "quest");
@@ -137,6 +143,12 @@ BSTEventResult QuestService::OnEvent(const TESQuestStageEvent* apEvent, const Ev
     if (!m_world.Get().GetPartyService().IsInParty())
     {
         NotifyOverlayOfQuestUpdate(apEvent->formId);
+        return BSTEventResult::kOk;
+    }
+
+    if (ConsumeResyncStageEcho(apEvent->formId, apEvent->stageId))
+    {
+        spdlog::debug(__FUNCTION__ ": suppressing resync echo stage formId: {:X}, questStage: {}, player {}", apEvent->formId, apEvent->stageId, PlayerId());
         return BSTEventResult::kOk;
     }
 
@@ -288,22 +300,73 @@ void QuestService::RememberPartyQuestUpdate(const NotifyQuestUpdate& aUpdate) no
 size_t QuestService::ReapplyCachedPartyQuestUpdates() noexcept
 {
     // Guest recovery only: replay NotifyQuestUpdate already received. Does not fetch leader state
-    // (no protocol change) and does not emit RequestQuestUpdate.
+    // (no protocol change). Applying fires game quest events whose OnEvent would normally send
+    // RequestQuestUpdate; since #848 removed the IsOverriden() early-outs, ApplyQuestUpdate's
+    // ScopedQuestOverride no longer stops that. While m_isResyncing, ApplyQuestUpdate records the
+    // expected echoes and OnEvent drops them (ConsumeResyncEcho).
     if (m_partyQuestUpdateCache.empty())
         return 0;
 
     size_t applied = 0;
     // Copy so ApplyQuestUpdate cannot invalidate the cache mid-loop.
-    // ApplyQuestUpdate holds ScopedQuestOverride (echo harden) for each entry.
     const Vector<NotifyQuestUpdate> snapshot = m_partyQuestUpdateCache;
+    m_isResyncing = true;
     for (const auto& update : snapshot)
     {
         ApplyQuestUpdate(update);
         ++applied;
     }
+    m_isResyncing = false;
 
     spdlog::info("Reapplied {} cached party quest update(s) for guest desync recovery", applied);
     return applied;
+}
+
+void QuestService::ExpectResyncEcho(uint32_t aFormId, uint16_t aStage, bool aStageEcho, uint8_t aStartStopMask) noexcept
+{
+    std::lock_guard lock(m_resyncEchoMutex);
+    m_resyncEchoes.push_back(ResyncEcho{aFormId, aStage, aStageEcho, aStartStopMask, std::chrono::steady_clock::now() + kResyncEchoWindow});
+}
+
+bool QuestService::ConsumeResyncStageEcho(uint32_t aFormId, uint16_t aStage) noexcept
+{
+    return ConsumeResyncEcho(aFormId, aStage, true, false);
+}
+
+bool QuestService::ConsumeResyncStartStopEcho(uint32_t aFormId, bool aStarted) noexcept
+{
+    return ConsumeResyncEcho(aFormId, 0, false, aStarted);
+}
+
+bool QuestService::ConsumeResyncEcho(uint32_t aFormId, uint16_t aStage, bool aIsStageEvent, bool aStarted) noexcept
+{
+    std::lock_guard lock(m_resyncEchoMutex);
+    if (m_resyncEchoes.empty())
+        return false;
+
+    const auto now = std::chrono::steady_clock::now();
+    m_resyncEchoes.erase(
+        std::remove_if(m_resyncEchoes.begin(), m_resyncEchoes.end(), [now](const ResyncEcho& e) { return e.Expiry < now; }), m_resyncEchoes.end());
+
+    for (auto it = m_resyncEchoes.begin(); it != m_resyncEchoes.end(); ++it)
+    {
+        if (it->FormId != aFormId)
+            continue;
+
+        const uint8_t startStopBit = aStarted ? kEchoStarted : kEchoStopped;
+        if (aIsStageEvent && it->StageEcho && it->Stage == aStage)
+            it->StageEcho = false;
+        else if (!aIsStageEvent && (it->StartStopMask & startStopBit))
+            it->StartStopMask = kEchoNone;
+        else
+            continue;
+
+        if (!it->StageEcho && it->StartStopMask == kEchoNone)
+            m_resyncEchoes.erase(it);
+        return true;
+    }
+
+    return false;
 }
 
 void QuestService::OnQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
@@ -314,10 +377,9 @@ void QuestService::OnQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
 
 void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
 {
-    // Echo harden belt (Party #5 / cache): remote apply + guest reapply. NOTE: #848 removed the
-    // ScopedQuestOverride::IsOverriden() early-outs from the OnEvent handlers (the override is
-    // thread_local and quest events fire later), so echo suppression now relies on #848's
-    // server-side QuestStageDedupHistory; this guard is kept as a harmless belt.
+    // NOTE: nothing checks ScopedQuestOverride::IsOverriden() since #848 (the override is thread_local
+    // and quest events can fire later on another thread), so this guard is inert. Live-update echo
+    // suppression is #848's server QuestStageDedupHistory; guest resync uses ExpectResyncEcho().
     ScopedQuestOverride _;
 
     auto Id = aUpdate.Id;
@@ -381,6 +443,8 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
                 miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type), pQuest->IsStopped(),
                 pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
 
+            if (m_isResyncing)
+                ExpectResyncEcho(formId, aUpdate.Stage, true, kEchoStarted);
             pQuest->ScriptSetStage(aUpdate.Stage);
             pQuest->SetActive(true);
         }
@@ -394,6 +458,8 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
             miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type), pQuest->IsStopped(),
             pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
 
+        if (m_isResyncing)
+            ExpectResyncEcho(formId, 0, true, kEchoStarted | kEchoStopped);
         pQuest->ScriptResetAndUpdate();
         wasUpdated = true;
         break;
@@ -405,6 +471,8 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
             miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type), pQuest->IsStopped(),
             pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
 
+        if (m_isResyncing && aUpdate.Stage != pQuest->currentStage)
+            ExpectResyncEcho(formId, aUpdate.Stage, true, kEchoNone);
         wasUpdated = pQuest->ScriptSetStage(aUpdate.Stage);
         break;
 
@@ -414,6 +482,8 @@ void QuestService::ApplyQuestUpdate(const NotifyQuestUpdate& aUpdate) noexcept
                          "isStopped: {}, flags: {:X}, {} {}, name: {}",
             miscQuest, formId, aUpdate.Stage, static_cast<std::underlying_type_t<TESQuest::Type>>(pQuest->type), pQuest->IsStopped(),
             pQuest->flags, playerString, PlayerId(), pQuest->fullName.value.AsAscii());
+        if (m_isResyncing && pQuest->getState() != TESQuest::State::Stopped)
+            ExpectResyncEcho(formId, 0, false, kEchoStopped);
         wasUpdated = StopQuest(formId);
         break;
 
