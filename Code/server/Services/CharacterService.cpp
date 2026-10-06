@@ -789,7 +789,11 @@ bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aE
 
     PartyService::Party* const pParty = partyService.GetPlayerParty(apPlayer);
     if (!pParty || std::find(pParty->Members.begin(), pParty->Members.end(), pCurrentOwner) == pParty->Members.end())
+    {
+        if (!pCurrentOwner->GetParty().JoinedPartyId.has_value())
+            return reject("the current owner is not in a party");
         return reject("the current owner is not in the party");
+    }
 
     return true;
 }

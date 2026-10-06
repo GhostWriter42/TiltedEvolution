@@ -36,6 +36,7 @@
 #include <Events/SubtitleEvent.h>
 #include <Events/MoveActorEvent.h>
 #include <Events/PartyJoinedEvent.h>
+#include <Events/PartyLeftEvent.h>
 
 #include <Structs/ActionEvent.h>
 #include <Messages/AssignCharacterRequest.h>
@@ -46,6 +47,7 @@
 #include <Messages/RequestFactionsChanges.h>
 #include <Messages/NotifyFactionsChanges.h>
 #include <Messages/NotifyRemoveCharacter.h>
+#include <Messages/NotifyPlayerLeft.h>
 #include <Messages/RequestOwnershipTransfer.h>
 #include <Messages/NotifyOwnershipTransfer.h>
 #include <Messages/RequestOwnershipClaim.h>
@@ -108,6 +110,8 @@ CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher,
     m_actorTeleportConnection = m_dispatcher.sink<NotifyActorTeleport>().connect<&CharacterService::OnNotifyActorTeleport>(this);
 
     m_partyJoinedConnection = aDispatcher.sink<PartyJoinedEvent>().connect<&CharacterService::OnPartyJoinedEvent>(this);
+    m_partyLeftConnection = aDispatcher.sink<PartyLeftEvent>().connect<&CharacterService::OnPartyLeftEvent>(this);
+    m_playerLeftConnection = aDispatcher.sink<NotifyPlayerLeft>().connect<&CharacterService::OnPlayerLeft>(this);
 }
 
 void CharacterService::DeleteRemoteEntityComponents(entt::entity aEntity) const noexcept
@@ -1201,6 +1205,39 @@ bool CharacterService::AllRemotePlayersArePartyMembers() const noexcept
     }
 
     return true;
+}
+
+void CharacterService::ClearRemoteOwnerPlayerId(const uint32_t aOwnerPlayerId) noexcept
+{
+    if (aOwnerPlayerId == 0)
+        return;
+
+    auto view = m_world.view<RemoteComponent>();
+    for (auto entity : view)
+    {
+        auto& remote = view.get<RemoteComponent>(entity);
+        if (remote.OwnerPlayerId == aOwnerPlayerId)
+            remote.OwnerPlayerId = 0;
+    }
+}
+
+void CharacterService::ClearAllRemoteOwnerPlayerIds() noexcept
+{
+    auto view = m_world.view<RemoteComponent>();
+    for (auto entity : view)
+        view.get<RemoteComponent>(entity).OwnerPlayerId = 0;
+}
+
+void CharacterService::OnPartyLeftEvent(const PartyLeftEvent&) noexcept
+{
+    // Drop stale party-owner hints so a later party join can use the single-party heuristic again.
+    ClearAllRemoteOwnerPlayerIds();
+}
+
+void CharacterService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
+{
+    // Owner disconnected: forget their id until a fresh NotifyOwnershipTransfer arrives.
+    ClearRemoteOwnerPlayerId(acMessage.PlayerId);
 }
 
 void CharacterService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept

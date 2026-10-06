@@ -39,6 +39,8 @@ struct SubtitleEvent;
 struct NotifySubtitle;
 struct NotifyActorTeleport;
 struct PartyJoinedEvent;
+struct PartyLeftEvent;
+struct NotifyPlayerLeft;
 
 struct Actor;
 struct World;
@@ -84,6 +86,8 @@ struct CharacterService
     void OnNotifySubtitle(const NotifySubtitle& acMessage) noexcept;
     void OnNotifyActorTeleport(const NotifyActorTeleport& acMessage) noexcept;
     void OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept;
+    void OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept;
+    void OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept;
 
     void ProcessNewEntity(entt::entity aEntity) const noexcept;
 
@@ -98,6 +102,8 @@ private:
     [[nodiscard]] bool IsPartyMemberPlayerId(uint32_t aPlayerId) const noexcept;
     // True when every known remote PlayerComponent belongs to our party (safe for speculative leader claims).
     [[nodiscard]] bool AllRemotePlayersArePartyMembers() const noexcept;
+    void ClearRemoteOwnerPlayerId(uint32_t aOwnerPlayerId) noexcept;
+    void ClearAllRemoteOwnerPlayerIds() noexcept;
 
     Actor* CreateCharacterForEntity(entt::entity aEntity) const noexcept;
     ActorData BuildActorData(Actor* apActor) const noexcept;
@@ -163,4 +169,6 @@ private:
     entt::scoped_connection m_subtitleSyncConnection;
     entt::scoped_connection m_actorTeleportConnection;
     entt::scoped_connection m_partyJoinedConnection;
+    entt::scoped_connection m_partyLeftConnection;
+    entt::scoped_connection m_playerLeftConnection;
 };
